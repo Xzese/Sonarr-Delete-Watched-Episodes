@@ -3,7 +3,7 @@ import os
 from plexapi.server import PlexServer
 from pyarr import SonarrAPI
 import os
-from dotenv import load_dotenv, set_key
+from dotenv import load_dotenv
 from pathlib import Path
 import datetime
 import time
@@ -20,14 +20,6 @@ def add_to_log(message):
         f.write(f'[{timestamp}] {message}\n')
 
 try:
-    # Function to prompt the user for input if the environment variable is not set
-    def get_env_variable(var_name, prompt):
-        value = os.getenv(var_name)
-        if not value:
-            value = input(f"{prompt}: ")
-            set_key(str(env_path), var_name, value)
-        return value
-
     # Function to validate and prompt for a positive integer input
     def get_non_negative_integer(prompt):
         while True:
@@ -41,11 +33,11 @@ try:
                 print("Please enter a valid non negative integer.")
 
     # Check and prompt for necessary environment variables
-    plex_url = get_env_variable('PLEX_URL', 'Please enter your Plex URL')
-    plex_token = get_env_variable('PLEX_TOKEN', 'Please enter your Plex Token (Refer to https://support.plex.tv/articles/204059436-finding-an-authentication-token-x-plex-token/ for help finding)')
-    sonarr_url = get_env_variable('SONARR_URL', 'Please enter your Sonarr URL')
-    sonarr_key = get_env_variable('SONARR_KEY', 'Please enter your Sonarr API Key (On Sonarr go to Settings => General)')
-    delete_by_default = get_env_variable('DEFAULT_DELETE', 'Do you want episodes to be deleted by default? Answer true or false')
+    plex_url = os.getenv('PLEX_URL')
+    plex_token = os.getenv('PLEX_TOKEN')
+    sonarr_url = os.getenv('SONARR_URL')
+    sonarr_key = os.getenv('SONARR_KEY')
+    delete_by_default = os.getenv('DEFAULT_DELETE')
 
     # Validate and prompt for the number of days until deletion
     days_until_deletion = os.getenv('DAYS_TO_DELETE')
@@ -63,9 +55,6 @@ try:
                 days_until_deletion = get_non_negative_integer('Please enter the number of days until deletion')
     else:
         days_until_deletion = get_non_negative_integer('Please enter the number of days until deletion')
-
-    # Set the DAYS_TO_DELETE environment variable in the .env file
-    set_key(str(env_path), 'DAYS_TO_DELETE', str(days_until_deletion))
 
     # Add 'd' to days_until_deletion
     days_until_deletion = str(days_until_deletion) + "d"
