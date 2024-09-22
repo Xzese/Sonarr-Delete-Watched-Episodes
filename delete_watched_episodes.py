@@ -2,17 +2,11 @@
 import os
 from plexapi.server import PlexServer
 from pyarr import SonarrAPI
-import os
 from dotenv import load_dotenv
-from pathlib import Path
 import datetime
 import time
 
-# Path to the .env file
-env_path = Path('.env')
-# Load existing environment variables from the .env file if it exists
-if env_path.exists():
-    load_dotenv(env_path)
+load_dotenv()
 
 def add_to_log(message):
     timestamp = datetime.datetime.now().strftime("%Y-%m-%d %H:%M:%S")
@@ -20,18 +14,6 @@ def add_to_log(message):
         f.write(f'[{timestamp}] {message}\n')
 
 try:
-    # Function to validate and prompt for a positive integer input
-    def get_non_negative_integer(prompt):
-        while True:
-            try:
-                value = int(input(f"{prompt}: "))
-                if value < 0:
-                    print("Please enter a non negative integer.")
-                else:
-                    return value
-            except ValueError:
-                print("Please enter a valid non negative integer.")
-
     # Check and prompt for necessary environment variables
     plex_url = os.getenv('PLEX_URL')
     plex_token = os.getenv('PLEX_TOKEN')
@@ -46,15 +28,13 @@ try:
             try:
                 days_until_deletion = int(days_until_deletion)
                 if days_until_deletion < 0:
-                    print("DAYS_TO_DELETE must be a non negative integer.")
-                    days_until_deletion = get_non_negative_integer('Please enter the number of days until deletion')
+                    days_until_deletion = 2
                 else:
                     break
             except ValueError:
-                print("DAYS_TO_DELETE must be a non negative integer.")
-                days_until_deletion = get_non_negative_integer('Please enter the number of days until deletion')
+                days_until_deletion = 2
     else:
-        days_until_deletion = get_non_negative_integer('Please enter the number of days until deletion')
+        days_until_deletion = 2
 
     # Add 'd' to days_until_deletion
     days_until_deletion = str(days_until_deletion) + "d"
