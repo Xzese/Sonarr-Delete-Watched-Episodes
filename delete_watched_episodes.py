@@ -89,4 +89,5 @@ except Exception as error:
     add_to_log("Script failed due to " + str(error))
     print("Script failed due to ", error)
 
-time.sleep(60*60*24)
+sleep_hours = int(os.getenv("SLEEP_HOURS", 24))
+time.sleep(60*60*sleep_hours)
