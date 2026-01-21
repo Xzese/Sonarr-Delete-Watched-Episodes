@@ -74,29 +74,64 @@ try:
             params={
                 "recursive": "true",
                 "includeItemTypes": "series",
-                "filters": "IsPlayed",
                 "fields": "ProviderIds",
-                "isFavorite": "false"
+                "isFavorite": "true"
             }
 
             user_id = client.jellyfin._get("Users")[0]['Id']
-            watched_series = client.jellyfin._get(f"Users/{user_id}/Items", params=params)['Items']
+            favourite_query = client.jellyfin._get(f"Users/{user_id}/Items", params=params)['Items']
+            favourite_series = [item['Id'] for item in favourite_query ]
             
+            start_index = 0
+            limit = 100
+
             params={
-                "userId": user_id,
+                "recursive": "true",
+                "includeItemTypes": "episode",
                 "fields": "ProviderIds",
-                "enableUserData": "true"
+                "isFavorite": "false",
+                "IsMissing": "false",
+                "filters":"IsPlayed",
+                "SortBy":"SeriesSortName,SortName",
+                "SortOrder":"Ascending",
+                "Limit": str(limit),
+                "StartIndex": str(start_index)
             }
-            for series in watched_series:
-                episodes = client.jellyfin._get(f"Shows/{series['Id']}/Episodes", params=params)['Items']
-                tvShowKey = series['ProviderIds']['Tvdb']
-                for episode in episodes:
-                    userData = episode['UserData']
-                
-                    if userData['Played'] == True and datetime.datetime.fromisoformat(userData['LastPlayedDate'].replace("Z", "+00:00")).date() < (datetime.datetime.today() - datetime.timedelta(days=days_until_deletion)).date():
-                        if tvShowKey not in episode_dict:
-                            episode_dict[tvShowKey] = []
-                        episode_dict[tvShowKey].append(episode['ProviderIds']['Tvdb'])
+
+            query = client.jellyfin._get(f"Users/{user_id}/Items", params=params)
+            watched_episodes = query['Items']
+
+            while query['TotalRecordCount'] > start_index:
+                start_index += limit
+                params['StartIndex'] = str(start_index)
+                query = client.jellyfin._get(f"Users/{user_id}/Items", params=params)
+                watched_episodes += query['Items']
+            
+            
+            filtered_watched_episodes = {}
+            for ep in watched_episodes:
+                series_id = ep.get("SeriesId")
+                tvdb_id = ep.get("ProviderIds", {}).get("Tvdb")
+                userData = ep['UserData']
+                if series_id not in favourite_series and tvdb_id and (userData['Played'] == True and datetime.datetime.fromisoformat(userData['LastPlayedDate'].replace("Z", "+00:00")).date() < (datetime.datetime.today() - datetime.timedelta(days=days_until_deletion)).date()):
+                    if series_id not in filtered_watched_episodes:
+                        filtered_watched_episodes[series_id] = []
+                    filtered_watched_episodes[series_id].append(tvdb_id)
+
+            series_ids = ",".join(filtered_watched_episodes.keys())
+
+            params={
+                "recursive": "true",
+                "includeItemTypes": "series",
+                "fields": "ProviderIds",
+                "ids": series_ids
+            }
+
+            series_query = client.jellyfin._get(f"Users/{user_id}/Items", params=params)
+            series_tvdb_map = {item['Id']: item['ProviderIds']['Tvdb'] for item in series_query['Items'] }
+
+            for key, value in filtered_watched_episodes.items():
+                episode_dict[series_tvdb_map[key]] = value
 
     deleted_episode = False
     
