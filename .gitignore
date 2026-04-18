@@ -3,3 +3,4 @@ __pycache__
 /.tar
 /.venv
 /output
+.DS_Store

@@ -14,6 +14,29 @@ def add_to_log(message):
     with open(os.getenv('LOG_FILE'), 'a') as f:
         f.write(f'[{timestamp}] {message}\n')
 
+def get_last_played_date(user_data):
+    """
+    Jellyfin has been inconsistent about which playback timestamp fields are
+    present across versions and item types. Return a date when we can, or None
+    when the record cannot be safely compared.
+    """
+    if not isinstance(user_data, dict):
+        return None
+
+    raw_timestamp = (
+        user_data.get("LastPlayedDate")
+        or user_data.get("DatePlayed")
+        or user_data.get("LastPlayedDateUtc")
+        or user_data.get("LastPlayedAt")
+    )
+    if not raw_timestamp:
+        return None
+
+    try:
+        return datetime.datetime.fromisoformat(raw_timestamp.replace("Z", "+00:00")).date()
+    except (TypeError, ValueError):
+        return None
+
 try:
     # Check and prompt for necessary environment variables
     sonarr_url = os.getenv('SONARR_URL')
@@ -112,13 +135,23 @@ try:
             for ep in watched_episodes:
                 series_id = ep.get("SeriesId")
                 tvdb_id = ep.get("ProviderIds", {}).get("Tvdb")
-                userData = ep['UserData']
-                if series_id not in favourite_series and tvdb_id and (userData['Played'] == True and datetime.datetime.fromisoformat(userData['LastPlayedDate'].replace("Z", "+00:00")).date() < (datetime.datetime.today() - datetime.timedelta(days=days_until_deletion)).date()):
+                user_data = ep.get("UserData", {})
+                last_played_date = get_last_played_date(user_data)
+                if (
+                    series_id
+                    and series_id not in favourite_series
+                    and tvdb_id
+                    and user_data.get("Played") is True
+                    and last_played_date
+                    and last_played_date < (datetime.datetime.today() - datetime.timedelta(days=days_until_deletion)).date()
+                ):
                     if series_id not in filtered_watched_episodes:
                         filtered_watched_episodes[series_id] = []
                     filtered_watched_episodes[series_id].append(tvdb_id)
 
-            series_ids = ",".join(filtered_watched_episodes.keys())
+            series_ids = ",".join(series_id for series_id in filtered_watched_episodes.keys() if series_id)
+            if not series_ids:
+                series_ids = None
 
             params={
                 "recursive": "true",
@@ -127,11 +160,19 @@ try:
                 "ids": series_ids
             }
 
-            series_query = client.jellyfin._get(f"Users/{user_id}/Items", params=params)
-            series_tvdb_map = {item['Id']: item['ProviderIds']['Tvdb'] for item in series_query['Items'] }
+            series_tvdb_map = {}
+            if series_ids:
+                series_query = client.jellyfin._get(f"Users/{user_id}/Items", params=params)
+                series_tvdb_map = {
+                    item["Id"]: item.get("ProviderIds", {}).get("Tvdb")
+                    for item in series_query["Items"]
+                    if item.get("Id") and item.get("ProviderIds", {}).get("Tvdb")
+                }
 
             for key, value in filtered_watched_episodes.items():
-                episode_dict[series_tvdb_map[key]] = value
+                tvdb_series_id = series_tvdb_map.get(key)
+                if tvdb_series_id:
+                    episode_dict[tvdb_series_id] = value
 
     deleted_episode = False
     
