@@ -1,5 +1,12 @@
 # Plex/Jellyfin and Sonarr Episode Cleanup Script
 
+<p align="center">
+  <a href="https://github.com/Xzese/Sonarr-Delete-Watched-Episodes/stargazers"><img src="https://img.shields.io/github/stars/Xzese/Sonarr-Delete-Watched-Episodes?style=flat-square" alt="Stars"></a>
+  <a href="https://github.com/Xzese/Sonarr-Delete-Watched-Episodes/commits/main"><img src="https://img.shields.io/github/last-commit/Xzese/Sonarr-Delete-Watched-Episodes?style=flat-square" alt="Last commit"></a>
+  <a href="https://python.org"><img src="https://img.shields.io/badge/Python-3-3776AB?style=flat-square&logo=python&logoColor=white" alt="Python"></a>
+  <a href="https://sonarr.tv"><img src="https://img.shields.io/badge/Sonarr-supported-FFC230?style=flat-square" alt="Sonarr"></a>
+</p>
+
 This Python script automates the cleanup of watched episodes in your Plex or Jellyfin library by removing them from your Sonarr library and unmonitoring them in Sonarr. It reads configuration from environment variables and performs the cleanup based on the specified criteria.
 
 ## Prerequisites
