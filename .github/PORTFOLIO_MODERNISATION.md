@@ -21,6 +21,7 @@ Status: guarded implementation with automated provider fixtures; keep this PR in
 - Synthetic Plex/Jellyfin/Sonarr fixtures and pinned-SDK contract tests.
 - CI for Python 3.11–3.14, lint/format checks and container startup verification.
 - Container arguments, build-context exclusions and documented setup/safety model.
+- Application modules in `src/`, automated fixtures/tests in `test/`, and a root CLI compatibility launcher.
 
 ## Follow-up before unattended use
 

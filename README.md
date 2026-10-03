@@ -11,7 +11,7 @@ python -m venv .venv
 .venv/bin/pip install -r requirements.txt
 cp .env.example .env
 # Configure Sonarr and one media provider in .env.
-.venv/bin/python delete_watched_episodes.py
+.venv/bin/python src/delete_watched_episodes.py
 ```
 
 The JSON report includes proposed file paths, sizes, episode identifiers, exclusion reasons and total bytes. Importing the module does not create clients or perform cleanup. Configuration is validated before network discovery; invalid values stop the run rather than changing the retention policy.
@@ -39,7 +39,7 @@ Jellyfin requires explicit `IsFavorite=false` on both the series and episode, `P
 Review a preview before running:
 
 ```sh
-.venv/bin/python delete_watched_episodes.py --apply --max-files 10 --max-bytes 10000000000
+.venv/bin/python src/delete_watched_episodes.py --apply --max-files 10 --max-bytes 10000000000
 ```
 
 The default limits are 10 files and 10 GB (decimal bytes). If the complete plan exceeds either limit, the run makes no mutations; it never silently deletes a truncated subset. Preview remains available when the plan exceeds apply limits.
@@ -74,9 +74,11 @@ The container defaults to preview. Credentials, local environments, logs and tes
 
 ## Development
 
+Application code lives in `src/`. Automated tests and their provider fixtures live in `test/` and `test/fixtures/`. The small root-level `delete_watched_episodes.py` launcher preserves existing script commands and schedules.
+
 ```sh
 .venv/bin/pip install -r requirements-dev.txt
-.venv/bin/python -m pytest -q
+.venv/bin/python -m pytest -q test
 .venv/bin/ruff check .
 .venv/bin/ruff format --check .
 ```
