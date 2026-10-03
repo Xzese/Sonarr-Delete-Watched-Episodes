@@ -60,17 +60,33 @@ This PR remains a draft for supervised use. It does not provide a cross-provider
 
 Apply performs new discovery rather than applying a saved, approved plan. The set of proposed files can differ from an earlier preview. Existing schedules that invoke the script without arguments now preview only, and need the explicit watch-policy configuration.
 
-Output goes to the console; legacy `LOG_FILE` and rotating-log settings are not used. Capture the JSON report if you need a record of a supervised run. Do not enable SDK debug logging with production credentials.
+## Rotating logs
+
+JSON reports continue to go to stdout. File logging preserves the original environment settings:
+
+| Setting | Default | Behaviour |
+| --- | --- | --- |
+| `LOG_FILE` | `output/log.txt` | Append to this file, creating its parent directory when the command runs. |
+| `LOG_LEVEL` | `INFO` | Standard Python level, case-insensitive. Run starts and successful reports use INFO; stopped or partial runs use ERROR. |
+| `LOG_RETENTION_WEEKS` | `4` | Keep up to this many weekly rotated backups. `0` keeps all backups. |
+
+Rotation is due on Monday at midnight in the process's local timezone and happens on the next log write. The timestamp and level prefix retain the original format. Reports in the file include proposed/deleted files, exclusions and partial outcomes; stdout remains plain JSON regardless of `LOG_LEVEL`.
+
+Logging is initialized inside `main()`. Importing modules or requesting `--help` creates no directories or handlers. Each invocation closes its handler; SDK/root logger settings are left alone. Preview writes local logs while remaining read-only against the remote libraries. Invalid logging settings or an unusable log path stop cleanup before network discovery.
+
+The file contains sanitized reports rather than raw SDK exception messages or authentication values. Do not enable SDK debug logging with production credentials. These logs are not a durable operation journal or a concurrency lock; inspect remote state after uncertain outcomes.
 
 ## Container
 
 ```sh
 docker build -t sonarr-cleanup .
-docker run --rm --env-file .env sonarr-cleanup
-docker run --rm --env-file .env sonarr-cleanup --apply --max-files 10 --max-bytes 10000000000
+docker run --rm --env-file .env -v "$PWD/output:/app/output" sonarr-cleanup
+docker run --rm --env-file .env -v "$PWD/output:/app/output" sonarr-cleanup --apply --max-files 10 --max-bytes 10000000000
 ```
 
 The container defaults to preview. Credentials, local environments, logs and tests are excluded from the image; configuration is supplied at runtime.
+
+The volume above preserves logs when the container is removed. If you change `LOG_FILE`, mount its directory at the corresponding container path.
 
 ## Development
 
@@ -83,7 +99,7 @@ Application code lives in `src/`. Automated tests and their provider fixtures li
 .venv/bin/ruff format --check .
 ```
 
-Tests use synthetic Plex XML and Jellyfin/Sonarr JSON fixtures. They exercise the pinned clients at their parsing or HTTP boundary without querying real libraries. Coverage includes shared files, retention boundaries, favourites, all-selected users, duplicate mappings, inconsistent pagination, replaced files, changed watch state, deletion limits and uncertain outcomes. CI runs tests and formatting on Python 3.11–3.14, plus a container startup smoke test.
+Tests use synthetic Plex XML and Jellyfin/Sonarr JSON fixtures. They exercise the pinned clients at their parsing or HTTP boundary without querying real libraries. Coverage includes shared files, retention boundaries, favourites, all-selected users, duplicate mappings, inconsistent pagination, replaced files, changed watch state, deletion limits, uncertain outcomes, rotating-log retention and import-safe logging. CI runs tests and formatting on Python 3.11–3.14, plus a container startup smoke test.
 
 Provider references: [PlexAPI library filtering](https://python-plexapi.readthedocs.io/en/latest/modules/library.html), [Jellyfin user data](https://typescript-sdk.jellyfin.org/interfaces/generated-client.UserItemDataDto.html), and [Sonarr API](https://sonarr.tv/docs/api/).
 

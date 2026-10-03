@@ -19,7 +19,7 @@ def jellyfin_data():
 
 
 @pytest.fixture
-def env():
+def env(tmp_path):
     return {
         "SONARR_URL": "https://sonarr.invalid",
         "SONARR_KEY": "fixture-key",
@@ -30,6 +30,7 @@ def env():
         "JELLYFIN_URL": "https://jellyfin.invalid",
         "JELLYFIN_TOKEN": "fixture-token",
         "JELLYFIN_USER_ID": "a" * 32,
+        "LOG_FILE": str(tmp_path / "output" / "log.txt"),
     }
 
 

@@ -22,6 +22,7 @@ Status: guarded implementation with automated provider fixtures; keep this PR in
 - CI for Python 3.11–3.14, lint/format checks and container startup verification.
 - Container arguments, build-context exclusions and documented setup/safety model.
 - Application modules in `src/`, automated fixtures/tests in `test/`, and a root CLI compatibility launcher.
+- Rotating file logs with the original settings/defaults, initialized in `main()` alongside JSON stdout reports; rotation/retention and error-reporting tests.
 
 ## Follow-up before unattended use
 
@@ -30,6 +31,5 @@ Status: guarded implementation with automated provider fixtures; keep this PR in
 - Saved-plan approval bound to configuration and refreshed state.
 - Assessment of unavoidable remote races and provider identity/path matching beyond TVDB metadata.
 - Optimise repeated provider discovery without weakening eligibility refresh.
-- Restore configurable file logging as a separate component if needed.
 
 No real library was queried or changed during development. Revalidation does not lock remote servers or make unmonitoring and deletion transactional. The README describes the supervised apply and partial-failure boundaries.

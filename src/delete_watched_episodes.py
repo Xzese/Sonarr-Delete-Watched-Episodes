@@ -11,6 +11,7 @@ from urllib.parse import urlparse
 from uuid import UUID
 
 from cleanup_plan import CleanupError, attach_file_metadata, execute_plans, plan_series, positive_id
+from run_logging import configure_logging, log_report
 from sonarr_client import create_sonarr_client
 
 
@@ -392,15 +393,23 @@ def main(argv=None, *, env=None, discover=None, client_factory=None):
     args = parser.parse_args(argv)
     mode = "apply" if args.apply else "preview"
     client = None
+    logger, log_handler = None, None
+
+    def report_result(report):
+        print(json.dumps(report, indent=2))
+        log_report(logger, report)
+
     try:
-        if args.max_files < 1 or args.max_bytes < 1:
-            raise CleanupError("Deletion limits must be positive.")
         if env is None:
             from dotenv import load_dotenv
 
             load_dotenv()
             env = os.environ
         env = dict(env)
+        logger, log_handler = configure_logging(env)
+        logger.info("Cleanup %s started.", mode)
+        if args.max_files < 1 or args.max_bytes < 1:
+            raise CleanupError("Deletion limits must be positive.")
         validate_config(env)
         discover = discover or discover_eligible
         eligible = discover(env)
@@ -440,17 +449,14 @@ def main(argv=None, *, env=None, discover=None, client_factory=None):
             max_bytes=args.max_bytes,
             revalidate=revalidate,
         )
-        print(
-            json.dumps(
-                {
-                    "mode": mode,
-                    "planned_files": len(plans),
-                    "planned_bytes": sum(p.identity.size for p in plans),
-                    "results": results,
-                    "exclusions": exclusions,
-                },
-                indent=2,
-            )
+        report_result(
+            {
+                "mode": mode,
+                "planned_files": len(plans),
+                "planned_bytes": sum(p.identity.size for p in plans),
+                "results": results,
+                "exclusions": exclusions,
+            }
         )
         return (
             1
@@ -458,23 +464,26 @@ def main(argv=None, *, env=None, discover=None, client_factory=None):
             else 0
         )
     except CleanupError as error:
-        print(json.dumps({"mode": mode, "status": "stopped", "reason": str(error)}))
+        report_result({"mode": mode, "status": "stopped", "reason": str(error)})
         return 1
     except Exception as error:
-        print(
-            json.dumps(
-                {
-                    "mode": mode,
-                    "status": "stopped",
-                    "error_type": type(error).__name__,
-                    "reason": "Discovery or planning failed. No automatic mutation retry was made.",
-                }
-            )
+        report_result(
+            {
+                "mode": mode,
+                "status": "stopped",
+                "error_type": type(error).__name__,
+                "reason": "Discovery or planning failed. No automatic mutation retry was made.",
+            }
         )
         return 1
     finally:
-        if client is not None:
-            client.session.close()
+        try:
+            if client is not None:
+                client.session.close()
+        finally:
+            if log_handler is not None:
+                logger.removeHandler(log_handler)
+                log_handler.close()
 
 
 if __name__ == "__main__":
