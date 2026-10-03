@@ -1,21 +1,25 @@
-# Safety-first modernisation
+# Safety-first cleanup modernisation
 
-Placeholder for modernising the watched-episode cleanup tool with stronger safeguards around destructive operations.
+Status: implementation started; keep this PR in draft.
 
-## Scope
-- Separate discovery/planning from mutation.
-- Add a read-only preview/dry-run mode that explains every proposed deletion and exclusion.
-- Require an explicit apply action for destructive changes.
-- Revalidate relevant state immediately before deletion.
-- Handle multi-episode files conservatively: delete a file only when every contained episode is eligible.
-- Rework season-unmonitor logic so watching the final numbered episode does not by itself imply the whole season is complete.
-- Require explicit Jellyfin user selection and define multi-user policy rather than selecting the first returned user.
-- Reject unsafe or invalid configuration instead of silently selecting destructive defaults.
-- Add deletion limits, structured operation results and partial-failure reporting.
-- Replace the exploratory test script with automated fixtures for Plex, Jellyfin and Sonarr edge cases.
-- Add CI and document the safety model.
+## Implemented
+- Import-safe command entry point and read-only default.
+- Explicit --apply and a per-run file limit checked before mutation.
+- Separate pure planner and executor.
+- Physical-file grouping; all contained episodes must qualify.
+- Conservative missing/duplicate ID handling and Sonarr membership rechecks.
+- No season-wide unmonitoring, library trash emptying or automatic retry.
+- Explicit Jellyfin user selection, conservative favourite handling and paging checks.
+- Clear invalid-retention errors and structured partial outcomes.
+- Nineteen mocked tests passed locally; exploratory test.py removed.
 
-## Portfolio outcome
-Present this as an example of careful automation engineering where missing evidence fails closed and destructive work is previewable and testable.
+## Remaining before unattended use
+- Fixture and live compatibility checks for Plex, Jellyfin and Sonarr clients.
+- Refresh media-provider eligibility immediately before apply and document unavoidable remote races.
+- Explicit multi-user policy for shared libraries.
+- Persistent operation journal, process ownership and uncertain-outcome reconciliation.
+- Saved-plan review/approval, byte limits, richer operation reasons and reporting.
+- Restore configurable file logging as a separate component if needed.
+- Packaging, formatting, CI and container smoke tests.
 
-No implementation is included in this placeholder PR.
+No real library was queried or changed. This is a first implementation, not a complete deletion-safety guarantee.
