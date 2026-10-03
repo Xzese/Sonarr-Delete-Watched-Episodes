@@ -33,7 +33,7 @@ jobs:
       - name: Missing configuration fails without starting cleanup
         run: |
           set +e
-          output=$(docker run --rm --network none sonarr-cleanup:test)
+          output=$(docker run --rm --network none sonarr-cleanup:test --json)
           result=$?
           set -e
           test "$result" -eq 1

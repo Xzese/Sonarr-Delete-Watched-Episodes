@@ -4,7 +4,7 @@ Status: guarded implementation with automated provider fixtures; keep this PR in
 
 ## Implemented
 
-- Import-safe command entry point, JSON preview by default and explicit `--apply`.
+- Import-safe command entry point, Readable activity output by default, optional JSON reports and explicit `--apply`.
 - Separate pure planner and mutation boundary with operation details and exclusion reasons.
 - File and byte limits checked across the complete plan before mutation; `MAX_FILES`/`MAX_BYTES` and CLI overrides support `0` to disable each cap independently.
 - Physical-file grouping; every contained episode must qualify.
@@ -22,7 +22,7 @@ Status: guarded implementation with automated provider fixtures; keep this PR in
 - CI for Python 3.11–3.14, lint/format checks and container startup verification.
 - Container arguments, build-context exclusions and documented setup/safety model.
 - Application modules in `src/`, automated fixtures/tests in `test/`, and a root CLI compatibility launcher.
-- Rotating file logs with the original settings/defaults, initialized in `main()` alongside JSON stdout reports; rotation/retention and error-reporting tests.
+- Rotating file logs with the original settings/defaults, initialized in `main()` alongside activity output and optional JSON stdout reports; rotation/retention and error-reporting tests.
 
 ## Follow-up before unattended use
 

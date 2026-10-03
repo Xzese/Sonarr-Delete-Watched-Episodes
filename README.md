@@ -14,7 +14,7 @@ cp .env.example .env
 .venv/bin/python src/delete_watched_episodes.py
 ```
 
-The JSON report includes proposed file paths, sizes, episode identifiers, exclusion reasons and total bytes. Importing the module does not create clients or perform cleanup. Configuration is validated before network discovery; invalid values stop the run rather than changing the retention policy.
+The default output is a readable activity log: metadata problems, proposed or confirmed deletions, errors and a completion summary. Routine retention decisions are omitted. Add `--json` to print the full diagnostic report, including file paths, sizes, episode identifiers and exclusion reasons. Importing the module does not create clients or perform cleanup. Configuration is validated before network discovery; invalid values stop the run rather than changing the retention policy.
 
 `DAYS_TO_DELETE` defaults to 2 and accepts whole numbers from 0 to 36500. An episode must have a valid playback timestamp strictly older than that many complete 24-hour periods. Episodes with playback in progress are retained.
 
@@ -57,7 +57,7 @@ Or for one apply invocation:
 .venv/bin/python src/delete_watched_episodes.py --apply --max-files 0 --max-bytes 0
 ```
 
-The JSON report and file log show the effective limits. If the complete plan exceeds either enabled limit, the run makes no mutations; it never silently deletes a truncated subset. Preview remains available when the plan exceeds apply limits. Disabling caps leaves explicit apply, eligibility, metadata and revalidation checks in effect.
+The optional JSON report shows the effective limits. If the complete plan exceeds either enabled limit, the run makes no mutations; it never silently deletes a truncated subset. Preview remains available when the plan exceeds apply limits. Disabling caps leaves explicit apply, eligibility, metadata and revalidation checks in effect.
 
 Each physical file is planned once. Every episode in that file must qualify. Incomplete, duplicate or contradictory Sonarr episode metadata skips the entire series. A valid file ID, series ID, path, size and import date are required for planning.
 
@@ -67,7 +67,7 @@ Only the selected file's episodes are unmonitored. The runner never unmonitors a
 
 ## Outcomes and remaining limits
 
-The command prints JSON to stdout and exits 1 on configuration errors, discovery failures, blocked applies or partial results. Apply results include `deleted`, `blocked` (no mutation attempted for that file), `unconfirmed` (a mutation was attempted), and `not_attempted`. Partial reports identify the phase and number of confirmed unmonitor calls. Sonarr calls have bounded timeouts, reject unexpected HTTP statuses and do not retry or follow redirects.
+The command prints activity messages to stdout (or a JSON report with `--json`) and exits 1 on configuration errors, discovery failures, blocked applies or partial results. Apply results include `deleted`, `blocked` (no mutation attempted for that file), `unconfirmed` (a mutation was attempted), and `not_attempted`. Partial reports identify the phase and number of confirmed unmonitor calls. Sonarr calls have bounded timeouts, reject unexpected HTTP statuses and do not retry or follow redirects.
 
 Unmonitoring and deletion are separate remote actions. An error or a changed eligibility check after unmonitoring can leave episodes unmonitored with their file still present. A timeout can happen after Sonarr completed a deletion. Inspect Sonarr and the media server before any later apply; the runner does not automatically restore monitoring or retry mutations.
 
@@ -77,19 +77,19 @@ Apply performs new discovery rather than applying a saved, approved plan. The se
 
 ## Rotating logs
 
-JSON reports continue to go to stdout. File logging preserves the original environment settings:
+Readable activity messages go to both stdout and the rotating log file. Use `--json` for a full report on stdout; file logs remain readable in either mode. File logging preserves the original environment settings:
 
 | Setting | Default | Behaviour |
 | --- | --- | --- |
 | `LOG_FILE` | `output/log.txt` | Append to this file, creating its parent directory when the command runs. |
-| `LOG_LEVEL` | `INFO` | Standard Python level, case-insensitive. Run starts and successful reports use INFO; stopped or partial runs use ERROR. |
+| `LOG_LEVEL` | `INFO` | Standard Python level, case-insensitive. Run starts, previews and confirmed deletions use INFO; actionable metadata problems use WARNING; stopped or partial runs use ERROR. |
 | `LOG_RETENTION_WEEKS` | `4` | Keep up to this many weekly rotated backups. `0` keeps all backups. |
 
-Rotation is due on Monday at midnight in the process's local timezone and happens on the next log write. The timestamp and level prefix retain the original format. Reports in the file include proposed/deleted files, exclusions and partial outcomes; stdout remains plain JSON regardless of `LOG_LEVEL`.
+Rotation is due on Monday at midnight in the process's local timezone and happens on the next log write. The timestamp and level prefix retain the original format. The file records run starts, proposed or confirmed deletions, actionable metadata problems, errors and completion summaries. Missing TVDB warnings include episode and series names. Routine watch eligibility, favourites and retention exclusions are not logged. `LOG_LEVEL` filters the file; console activity or optional JSON output remains available regardless of that setting.
 
 Logging is initialized inside `main()`. Importing modules or requesting `--help` creates no directories or handlers. Each invocation closes its handler; SDK/root logger settings are left alone. Preview writes local logs while remaining read-only against the remote libraries. Invalid logging settings or an unusable log path stop cleanup before network discovery.
 
-The file contains sanitized reports rather than raw SDK exception messages or authentication values. Do not enable SDK debug logging with production credentials. These logs are not a durable operation journal or a concurrency lock; inspect remote state after uncertain outcomes.
+The file contains sanitized activity messages rather than raw SDK exception messages or authentication values. Do not enable SDK debug logging with production credentials. These logs are not a durable operation journal or a concurrency lock; inspect remote state after uncertain outcomes.
 
 ## Container
 

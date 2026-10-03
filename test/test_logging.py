@@ -14,26 +14,67 @@ from run_logging import configure_logging
 
 def preview(env, client):
     return runner.main(
-        [], env=env, discover=lambda env: {99: {101, 102}}, client_factory=lambda *args: client
+        ["--json"],
+        env=env,
+        discover=lambda env: {99: {101, 102}},
+        client_factory=lambda *args: client,
     )
 
 
-def test_file_log_preserves_json_console_report(env, client, capsys):
+@pytest.mark.parametrize("apply", [False, True])
+def test_activity_logs_actions_and_metadata_without_routine_retention(env, client, capsys, apply):
+    eligible = runner.Eligibility()
+    eligible[99] = {101, 102}
+    diagnostic = (
+        "Skipping Jellyfin episode 'Pilot' in series 'Fixture': missing episode TVDB identifier."
+    )
+    routine = [
+        "Plex series 99, episode 101 retained: genre policy.",
+        "Plex series 99, episode 101 retained: unwatched, in progress or inside retention.",
+        "Jellyfin series 99, episode 101 retained: ambiguous, protected, in progress or outside watch policy.",
+        "Jellyfin series 99, episode 101 retained: missing user metadata.",
+        "Series 5, file 11 retained: not every episode has eligible watch evidence.",
+    ]
+    eligible.exclusions = [diagnostic, diagnostic, *routine]
+    assert (
+        runner.main(
+            ["--apply"] if apply else [],
+            env=env,
+            discover=lambda env: eligible,
+            client_factory=lambda *args: client,
+        )
+        == 0
+    )
+    output = capsys.readouterr().out
+    contents = Path(env["LOG_FILE"]).read_text()
+    action = "Deleted and unmonitored" if apply else "Would delete and unmonitor"
+    for text in (output, contents):
+        assert text.count(diagnostic) == 1
+        assert f"{action}: episode.mkv (1000 bytes)." in text
+        assert all(reason not in text for reason in routine)
+        assert '"exclusions"' not in text and '"results"' not in text
+        assert env["SONARR_KEY"] not in text and env["PLEX_TOKEN"] not in text
+    if apply:
+        client.del_episode_file.assert_called_once_with(10)
+        assert "Cleanup complete: deleted 1 file(s)" in output
+    else:
+        assert "Dry run complete: 1 file(s) would be deleted" in output
+        client.upd_episode.assert_not_called()
+        client.del_episode_file.assert_not_called()
+
+
+def test_json_report_is_opt_in_and_never_dumped_to_file_log(env, client, capsys):
     assert preview(env, client) == 0
     report = json.loads(capsys.readouterr().out)
-    contents = Path(env["LOG_FILE"]).read_text()
-    assert "[INFO] Cleanup preview started." in contents
-    assert json.dumps(report) in contents
-    assert report["results"][0]["status"] == "preview"
-    client.upd_episode.assert_not_called()
-    client.del_episode_file.assert_not_called()
+    assert report["mode"] == "preview" and report["planned_bytes"] == 1000
+    assert '"results"' not in Path(env["LOG_FILE"]).read_text()
 
 
 def test_partial_failure_is_logged_without_raw_sdk_credentials(env, client, capsys):
     client.del_episode_file.side_effect = TimeoutError("fixture-secret-token")
     assert (
         runner.main(
-            ["--apply"],
+            ["--apply", "--json"],
             env=env,
             discover=lambda env: {99: {101, 102}},
             client_factory=lambda *args: client,
@@ -43,7 +84,11 @@ def test_partial_failure_is_logged_without_raw_sdk_credentials(env, client, caps
     report = json.loads(capsys.readouterr().out)
     contents = Path(env["LOG_FILE"]).read_text()
     assert report["results"][0]["status"] == "unconfirmed"
-    assert "[ERROR]" in contents and json.dumps(report) in contents
+    assert (
+        "[ERROR] Cleanup unconfirmed: episode.mkv; phase delete; 2 unmonitor calls confirmed."
+        in contents
+    )
+    assert "Deleted and unmonitored" not in contents
     assert "fixture-secret-token" not in contents
     assert env["SONARR_KEY"] not in contents and env["PLEX_TOKEN"] not in contents
 
@@ -51,10 +96,10 @@ def test_partial_failure_is_logged_without_raw_sdk_credentials(env, client, caps
 def test_configuration_error_is_logged_before_network(env, capsys):
     env["DAYS_TO_DELETE"] = "invalid"
     discover = Mock()
-    assert runner.main([], env=env, discover=discover) == 1
+    assert runner.main(["--json"], env=env, discover=discover) == 1
     report = json.loads(capsys.readouterr().out)
     contents = Path(env["LOG_FILE"]).read_text()
-    assert "[ERROR]" in contents and json.dumps(report) in contents
+    assert "[ERROR] Cleanup stopped: " + report["reason"] in contents
     discover.assert_not_called()
 
 
@@ -82,7 +127,7 @@ def test_log_level_filters_file_messages_without_filtering_stdout(env, client, c
 def test_invalid_logging_configuration_stops_before_network(env, capsys, field, value):
     env[field] = value
     discover, factory = Mock(), Mock()
-    assert runner.main([], env=env, discover=discover, client_factory=factory) == 1
+    assert runner.main(["--json"], env=env, discover=discover, client_factory=factory) == 1
     report = json.loads(capsys.readouterr().out)
     assert report["status"] == "stopped" and field in report["reason"]
     discover.assert_not_called()
@@ -94,7 +139,7 @@ def test_unwritable_log_path_stops_before_network(env, tmp_path, capsys):
     parent.write_text("fixture")
     env["LOG_FILE"] = str(parent / "log.txt")
     discover, factory = Mock(), Mock()
-    assert runner.main([], env=env, discover=discover, client_factory=factory) == 1
+    assert runner.main(["--json"], env=env, discover=discover, client_factory=factory) == 1
     assert "Cannot create" in json.loads(capsys.readouterr().out)["reason"]
     discover.assert_not_called()
     factory.assert_not_called()
@@ -115,7 +160,7 @@ def test_repeated_runs_close_handlers_without_duplicate_records(env, client, cap
         json.loads(capsys.readouterr().out)
     contents = Path(env["LOG_FILE"]).read_text()
     assert contents.count("Cleanup preview started.") == 2
-    assert contents.count('"mode": "preview"') == 2
+    assert contents.count("Dry run complete:") == 2
     assert all(not logger.handlers and handler.stream is None for logger, handler in loggers)
     assert logging.getLogger().handlers == root_handlers
 

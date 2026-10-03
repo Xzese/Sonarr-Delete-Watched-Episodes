@@ -133,6 +133,15 @@ def test_jellyfin_fixture_and_user_specific_query(env, jellyfin_data, monkeypatc
         assert call.args[0] == f"Users/{'a' * 32}/Items"
         assert call.kwargs["params"]["EnableUserData"] == "true"
     client.http.stop_session.assert_called_once()
+    episode = jellyfin_data["episodes"]["Items"][0]
+    episode.update(Name="Pilot", ParentIndexNumber=2, IndexNumber=1, SeriesName="Fixture Show")
+    episode["ProviderIds"].pop("Tvdb")
+    eligible = runner.discover_jellyfin(env, 2)
+    assert eligible == {99: {102}}
+    assert any(
+        "'Pilot (S02E01)'" in reason and "missing episode TVDB identifier" in reason
+        for reason in eligible.exclusions
+    )
 
 
 @pytest.mark.parametrize(
@@ -178,7 +187,9 @@ def test_jellyfin_duplicate_series_mapping_is_retained(env, jellyfin_data, monke
     jellyfin_data["series"]["Items"].append(duplicate)
     jellyfin_data["series"]["TotalRecordCount"] = 2
     jellyfin_client(monkeypatch, {"a" * 32: jellyfin_data})
-    assert not runner.discover_jellyfin(env, 2)
+    eligible = runner.discover_jellyfin(env, 2)
+    assert not eligible
+    assert any("duplicate series TVDB mapping" in reason for reason in eligible.exclusions)
 
 
 @pytest.mark.parametrize("protected", ["unwatched", "favourite", "invisible"])
