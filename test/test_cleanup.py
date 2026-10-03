@@ -227,7 +227,12 @@ def test_jellyfin_requires_explicit_user_before_client_import():
 def test_cli_defaults_to_preview(capsys, env, client):
     assert (
         main(
-            [], env=env, discover=lambda env: {99: {101, 102}}, client_factory=lambda *args: client
+            [
+                "--json",
+            ],
+            env=env,
+            discover=lambda env: {99: {101, 102}},
+            client_factory=lambda *args: client,
         )
         == 0
     )
@@ -241,7 +246,10 @@ def test_cli_defaults_to_preview(capsys, env, client):
 
 def test_cli_apply_refreshes_discovery(capsys, env, client):
     discover = Mock(side_effect=[{99: {101, 102}}, {}])
-    assert main(["--apply"], env=env, discover=discover, client_factory=lambda *args: client) == 1
+    assert (
+        main(["--json", "--apply"], env=env, discover=discover, client_factory=lambda *args: client)
+        == 1
+    )
     assert json.loads(capsys.readouterr().out)["results"][0]["status"] == "blocked"
     assert discover.call_count == 2
     client.upd_episode.assert_not_called()
@@ -251,7 +259,7 @@ def test_cli_changed_series_mapping_blocks_apply(capsys, env, client):
     client.get_series.side_effect = [[{"id": 5, "tvdbId": 99}], [{"id": 6, "tvdbId": 99}]]
     assert (
         main(
-            ["--apply"],
+            ["--json", "--apply"],
             env=env,
             discover=lambda env: {99: {101, 102}},
             client_factory=lambda *args: client,
@@ -278,7 +286,17 @@ def test_invalid_configuration_stops_before_network(env, client, capsys, field, 
     env[field] = value
     discover = Mock()
     factory = Mock(return_value=client)
-    assert main([], env=env, discover=discover, client_factory=factory) == 1
+    assert (
+        main(
+            [
+                "--json",
+            ],
+            env=env,
+            discover=discover,
+            client_factory=factory,
+        )
+        == 1
+    )
     assert json.loads(capsys.readouterr().out)["status"] == "stopped"
     discover.assert_not_called()
     factory.assert_not_called()
@@ -287,7 +305,14 @@ def test_invalid_configuration_stops_before_network(env, client, capsys, field, 
 def test_no_unique_sonarr_match_is_excluded(capsys, env, client):
     client.get_series.return_value *= 2
     assert (
-        main([], env=env, discover=lambda env: {99: {101}}, client_factory=lambda *args: client)
+        main(
+            [
+                "--json",
+            ],
+            env=env,
+            discover=lambda env: {99: {101}},
+            client_factory=lambda *args: client,
+        )
         == 0
     )
     report = json.loads(capsys.readouterr().out)

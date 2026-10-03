@@ -79,7 +79,7 @@ def test_file_limit_zero_from_environment_or_cli(env, client, large_plan, capsys
     env.update(settings)
     assert (
         main(
-            argv,
+            ["--json", *argv],
             env=env,
             discover=lambda env: {99: set(range(101, 112))},
             client_factory=lambda *args: client,
@@ -103,7 +103,7 @@ def test_byte_limit_zero_from_environment_or_cli(env, client, capsys, argv, sett
     client.get_episode_file.return_value["size"] = 20_000_000_000
     assert (
         main(
-            argv,
+            ["--json", *argv],
             env=env,
             discover=lambda env: {99: {101, 102}},
             client_factory=lambda *args: client,
@@ -119,7 +119,7 @@ def test_cli_can_reenable_a_disabled_environment_limit(env, client, capsys):
     env["MAX_BYTES"] = "0"
     assert (
         main(
-            ["--apply", "--max-bytes", "999"],
+            ["--json", "--apply", "--max-bytes", "999"],
             env=env,
             discover=lambda env: {99: {101, 102}},
             client_factory=lambda *args: client,
@@ -145,7 +145,17 @@ def test_cli_can_reenable_a_disabled_environment_limit(env, client, capsys):
 def test_invalid_environment_limits_stop_before_network(env, capsys, field, value):
     env[field] = value
     discover, factory = Mock(), Mock()
-    assert main([], env=env, discover=discover, client_factory=factory) == 1
+    assert (
+        main(
+            [
+                "--json",
+            ],
+            env=env,
+            discover=discover,
+            client_factory=factory,
+        )
+        == 1
+    )
     assert field in json.loads(capsys.readouterr().out)["reason"]
     discover.assert_not_called()
     factory.assert_not_called()
@@ -154,7 +164,7 @@ def test_invalid_environment_limits_stop_before_network(env, capsys, field, valu
 @pytest.mark.parametrize("flag", ["--max-files", "--max-bytes"])
 def test_negative_cli_limits_stop_before_network(env, capsys, flag):
     discover, factory = Mock(), Mock()
-    assert main([flag, "-1"], env=env, discover=discover, client_factory=factory) == 1
+    assert main(["--json", flag, "-1"], env=env, discover=discover, client_factory=factory) == 1
     assert "non-negative" in json.loads(capsys.readouterr().out)["reason"]
     discover.assert_not_called()
     factory.assert_not_called()
@@ -164,7 +174,12 @@ def test_preview_reports_both_disabled_limits(env, client, capsys):
     env.update(MAX_FILES="0", MAX_BYTES="0")
     assert (
         main(
-            [], env=env, discover=lambda env: {99: {101, 102}}, client_factory=lambda *args: client
+            [
+                "--json",
+            ],
+            env=env,
+            discover=lambda env: {99: {101, 102}},
+            client_factory=lambda *args: client,
         )
         == 0
     )

@@ -163,7 +163,10 @@ def discover_plex(env, days):
         show = episode.show()
         series_id, episode_id = _tvdb(show.guids), _tvdb(episode.guids)
         if not series_id or not episode_id:
-            eligible.exclusions.append("Plex item retained: missing or ambiguous TVDB identifiers.")
+            eligible.exclusions.append(
+                f"Skipping Plex episode '{episode.title}' in series '{show.title}': "
+                "missing or ambiguous TVDB identifiers."
+            )
             continue
         key = (series_id, episode_id)
         show_handles.setdefault(series_id, set()).add(positive_id(show.ratingKey))
@@ -282,7 +285,20 @@ def _jellyfin_user_eligibility(client, user_id, cutoff):
         try:
             episode_id = positive_id(episode.get("ProviderIds", {}).get("Tvdb"))
         except ValueError:
-            eligible.exclusions.append("Jellyfin item retained: missing episode TVDB identifier.")
+            episode_name = episode.get("Name") or episode["Id"]
+            season, number = episode.get("ParentIndexNumber"), episode.get("IndexNumber")
+            if type(season) is int and type(number) is int:
+                episode_name = f"{episode_name} (S{season:02}E{number:02})"
+            series_name = (
+                (show[1].get("Name") if show else None)
+                or episode.get("SeriesName")
+                or episode.get("SeriesId")
+                or "unknown series"
+            )
+            eligible.exclusions.append(
+                f"Skipping Jellyfin episode '{episode_name}' in series '{series_name}': "
+                "missing episode TVDB identifier."
+            )
             continue
         if show is None:
             eligible.exclusions.append(
@@ -294,6 +310,11 @@ def _jellyfin_user_eligibility(client, user_id, cutoff):
         if key in seen:
             duplicates.add(key)
         seen.add(key)
+        if series_id in ambiguous_series:
+            eligible.exclusions.append(
+                f"Jellyfin series {series_id} retained: duplicate series TVDB mapping."
+            )
+            continue
         data, show_user_data = episode.get("UserData"), show_data.get("UserData")
         if not isinstance(data, dict) or not isinstance(show_user_data, dict):
             eligible.exclusions.append(
@@ -302,8 +323,7 @@ def _jellyfin_user_eligibility(client, user_id, cutoff):
             continue
         played = get_last_played_timestamp(data)
         if (
-            series_id in ambiguous_series
-            or show_user_data.get("IsFavorite") is not False
+            show_user_data.get("IsFavorite") is not False
             or data.get("IsFavorite") is not False
             or data.get("Played") is not True
             or type(data.get("PlaybackPositionTicks")) is not int
@@ -393,6 +413,11 @@ def main(argv=None, *, env=None, discover=None, client_factory=None):
         help="Permit unmonitoring and deletion. Default is read-only.",
     )
     parser.add_argument(
+        "--json",
+        action="store_true",
+        help="Print the full JSON report instead of activity messages.",
+    )
+    parser.add_argument(
         "--max-files",
         type=int,
         help="Maximum files in one apply run (MAX_FILES or 10). 0 disables this limit.",
@@ -408,8 +433,9 @@ def main(argv=None, *, env=None, discover=None, client_factory=None):
     logger, log_handler = None, None
 
     def report_result(report):
-        print(json.dumps(report, indent=2))
-        log_report(logger, report)
+        if args.json:
+            print(json.dumps(report, indent=2))
+        log_report(logger, report, console=not args.json)
 
     try:
         if env is None:
@@ -420,6 +446,8 @@ def main(argv=None, *, env=None, discover=None, client_factory=None):
         env = dict(env)
         logger, log_handler = configure_logging(env)
         logger.info("Cleanup %s started.", mode)
+        if not args.json:
+            print(f"[INFO] Cleanup {mode} started.")
         max_files = deletion_limit(args.max_files, env, "MAX_FILES", 10)
         max_bytes = deletion_limit(args.max_bytes, env, "MAX_BYTES", 10_000_000_000)
         validate_config(env)
