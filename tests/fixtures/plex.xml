@@ -1,0 +1,12 @@
+<MediaContainer size="3">
+  <Directory type="show" key="/library/metadata/5" ratingKey="5" title="Fixture Show">
+    <Guid id="tvdb://99" />
+    <Genre tag="Delete" />
+  </Directory>
+  <Video type="episode" key="/library/metadata/1" ratingKey="1" title="Episode One" viewCount="1" viewOffset="0" lastViewedAt="1735732800">
+    <Guid id="tvdb://101" />
+  </Video>
+  <Video type="episode" key="/library/metadata/2" ratingKey="2" title="Episode Two" viewCount="1" viewOffset="0" lastViewedAt="1735732800">
+    <Guid id="tvdb://102" />
+  </Video>
+</MediaContainer>

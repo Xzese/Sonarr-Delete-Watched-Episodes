@@ -1,25 +1,34 @@
 # Safety-first cleanup modernisation
 
-Status: implementation started; keep this PR in draft.
+Status: guarded implementation with automated provider fixtures; keep this PR in draft for supervised validation.
 
 ## Implemented
-- Import-safe command entry point and read-only default.
-- Explicit --apply and a per-run file limit checked before mutation.
-- Separate pure planner and executor.
-- Physical-file grouping; all contained episodes must qualify.
-- Conservative missing/duplicate ID handling and Sonarr membership rechecks.
-- No season-wide unmonitoring, library trash emptying or automatic retry.
-- Explicit Jellyfin user selection, conservative favourite handling and paging checks.
-- Clear invalid-retention errors and structured partial outcomes.
-- Nineteen mocked tests passed locally; exploratory test.py removed.
 
-## Remaining before unattended use
-- Fixture and live compatibility checks for Plex, Jellyfin and Sonarr clients.
-- Refresh media-provider eligibility immediately before apply and document unavoidable remote races.
-- Explicit multi-user policy for shared libraries.
+- Import-safe command entry point, JSON preview by default and explicit `--apply`.
+- Separate pure planner and mutation boundary with operation details and exclusion reasons.
+- File and byte limits checked across the complete plan before mutation.
+- Physical-file grouping; every contained episode must qualify.
+- Conservative missing, duplicate and contradictory metadata handling.
+- Sonarr series, episode membership and file fingerprint rechecks.
+- Fresh media eligibility before unmonitoring and again before deletion.
+- Explicit watch policy: Plex token user; Jellyfin selected user or intersection of all explicitly selected users.
+- Strict retention, URL, user-selection and boolean configuration validation before network clients.
+- Jellyfin favourite protection, in-progress protection and pagination consistency checks.
+- Plex episode-level playback timestamps, genre protection and ambiguous-mapping exclusions.
+- No season-wide unmonitoring, library trash emptying or automatic mutation retry.
+- Structured partial outcomes and confirmation of episode unmonitoring responses.
+- Bounded Sonarr requests; all unexpected HTTP statuses and redirects rejected.
+- Synthetic Plex/Jellyfin/Sonarr fixtures and pinned-SDK contract tests.
+- CI for Python 3.11–3.14, lint/format checks and container startup verification.
+- Container arguments, build-context exclusions and documented setup/safety model.
+
+## Follow-up before unattended use
+
+- Supervised read-only compatibility checks against supported live server versions.
 - Persistent operation journal, process ownership and uncertain-outcome reconciliation.
-- Saved-plan review/approval, byte limits, richer operation reasons and reporting.
+- Saved-plan approval bound to configuration and refreshed state.
+- Assessment of unavoidable remote races and provider identity/path matching beyond TVDB metadata.
+- Optimise repeated provider discovery without weakening eligibility refresh.
 - Restore configurable file logging as a separate component if needed.
-- Packaging, formatting, CI and container smoke tests.
 
-No real library was queried or changed. This is a first implementation, not a complete deletion-safety guarantee.
+No real library was queried or changed during development. Revalidation does not lock remote servers or make unmonitoring and deletion transactional. The README describes the supervised apply and partial-failure boundaries.
