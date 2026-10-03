@@ -1,0 +1,8 @@
+{
+  "series": [{"id": 5, "tvdbId": 99, "title": "Fixture Show"}],
+  "episodes": [
+    {"id": 1, "seriesId": 5, "tvdbId": 101, "hasFile": true, "episodeFileId": 10, "monitored": true},
+    {"id": 2, "seriesId": 5, "tvdbId": 102, "hasFile": true, "episodeFileId": 10, "monitored": true}
+  ],
+  "file": {"id": 10, "seriesId": 5, "path": "/tv/Fixture/episode.mkv", "size": 1000, "dateAdded": "2025-01-01T00:00:00Z"}
+}

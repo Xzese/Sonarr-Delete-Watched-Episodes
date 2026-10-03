@@ -1,0 +1,40 @@
+name: CI
+
+on:
+  push:
+  pull_request:
+
+permissions:
+  contents: read
+
+jobs:
+  test:
+    runs-on: ubuntu-latest
+    strategy:
+      matrix:
+        python: ["3.11", "3.12", "3.13", "3.14"]
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: ${{ matrix.python }}
+          cache: pip
+      - run: python -m pip install -r requirements-dev.txt
+      - run: python -m pytest -q test
+      - run: ruff check .
+      - run: ruff format --check .
+
+  container:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - run: docker build -t sonarr-cleanup:test .
+      - run: docker run --rm --network none sonarr-cleanup:test --help
+      - name: Missing configuration fails without starting cleanup
+        run: |
+          set +e
+          output=$(docker run --rm --network none sonarr-cleanup:test)
+          result=$?
+          set -e
+          test "$result" -eq 1
+          printf '%s' "$output" | python3 -c 'import json, sys; assert json.load(sys.stdin)["status"] == "stopped"'

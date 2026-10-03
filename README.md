@@ -1,92 +1,121 @@
-# Plex/Jellyfin and Sonarr Episode Cleanup Script
+# Watched episode cleanup for Sonarr
 
-<p align="center">
-  <a href="https://github.com/Xzese/Sonarr-Delete-Watched-Episodes/stargazers"><img src="https://img.shields.io/github/stars/Xzese/Sonarr-Delete-Watched-Episodes?style=flat-square" alt="Stars"></a>
-  <a href="https://github.com/Xzese/Sonarr-Delete-Watched-Episodes/commits/main"><img src="https://img.shields.io/github/last-commit/Xzese/Sonarr-Delete-Watched-Episodes?style=flat-square" alt="Last commit"></a>
-  <a href="https://python.org"><img src="https://img.shields.io/badge/Python-3-3776AB?style=flat-square&logo=python&logoColor=white" alt="Python"></a>
-  <a href="https://sonarr.tv"><img src="https://img.shields.io/badge/Sonarr-supported-FFC230?style=flat-square" alt="Sonarr"></a>
-</p>
+Build a file-level cleanup plan from Plex or Jellyfin watch evidence. The default command only reads library state. Deleting files and unmonitoring episodes requires `--apply`.
 
-This Python script automates the cleanup of watched episodes in your Plex or Jellyfin library by removing them from your Sonarr library and unmonitoring them in Sonarr. It reads configuration from environment variables and performs the cleanup based on the specified criteria.
+## Setup and preview
 
-## Prerequisites
+Use Python 3.11 or later:
 
-Before using this script, make sure you have the following prerequisites installed:
+```sh
+python -m venv .venv
+.venv/bin/pip install -r requirements.txt
+cp .env.example .env
+# Configure Sonarr and one media provider in .env.
+.venv/bin/python src/delete_watched_episodes.py
+```
 
-- Python 3
-- `plexapi` library: You can install it via pip (`pip install plexapi`)
-- `jellyfin_apiclient_python` library: You can install it via pip (`pip install jellyfin_apiclient_python`)
-- `pyarr` library: You can install it via pip (`pip install pyarr`)
-- `python-dotenv` library: You can install it via pip (`pip install python-dotenv`)
+The JSON report includes proposed file paths, sizes, episode identifiers, exclusion reasons and total bytes. Importing the module does not create clients or perform cleanup. Configuration is validated before network discovery; invalid values stop the run rather than changing the retention policy.
 
-## Setup
+`DAYS_TO_DELETE` defaults to 2 and accepts whole numbers from 0 to 36500. An episode must have a valid playback timestamp strictly older than that many complete 24-hour periods. Episodes with playback in progress are retained.
 
-1. Clone or download this repository to your local machine.
-2. Ensure you have the necessary environment variables set in a `.env` file:
-   
-   **Required for all setups:**
-   - `SONARR_URL`: Your Sonarr server URL
-   - `SONARR_KEY`: Your Sonarr API key (You can find it in Sonarr by navigating to Settings => General)
-   - `DAYS_TO_DELETE`: Number of days until episodes are deleted (default: 2)
-   - `DEFAULT_DELETE`: Delete episodes by default? Answer `true` or `false`. If not `false`, defaults to `true`
-   - `LOG_FILE`: Path to the log file (default: output/log.txt)
-   - `LOG_LEVEL`: Log level (default: INFO)
-   - `LOG_RETENTION_WEEKS`: Number of weekly rotated logs to keep (default: 4)
-   - `MEDIA_SERVICE`: Choose `plex` or `jellyfin` (default: plex)
-   
-   **For Plex:**
-   - `PLEX_URL`: Your Plex server URL
-   - `PLEX_TOKEN`: Your Plex authentication token (Refer to [Plex Support](https://support.plex.tv/articles/204059436-finding-an-authentication-token-x-plex-token/) for help finding)
-   
-   **For Jellyfin:**
-   - `JELLYFIN_URL`: Your Jellyfin server URL
-   - `JELLYFIN_TOKEN`: Your Jellyfin API token
-   
-   **Optional:**
+## Choose whose watch state authorises deletion
 
-3. Run the script.
+`WATCH_POLICY` is required, including for preview. Selecting users is a decision about shared files: deleting a file removes it for everyone who uses that library.
 
-## Supported Media Services
+| Provider | Policy | Behaviour |
+| --- | --- | --- |
+| Plex | `selected-user` | Use the user represented by `PLEX_TOKEN`. Other users' watch state is not checked. |
+| Jellyfin | `selected-user` | Require exactly one explicitly selected user. |
+| Jellyfin | `all-selected` | Require every selected user to have eligible watch evidence and no protection on each episode. Missing or inaccessible evidence blocks eligibility. |
 
-### Plex
-The script works with Plex media libraries. It filters watched episodes using the "Keep" and "Delete" genres.
+For Jellyfin, set exactly one of `JELLYFIN_USER_ID` or comma-separated `JELLYFIN_USER_IDS`. IDs must be UUIDs; duplicate IDs are rejected. The runner never picks the first user or automatically discovers the users whose state should count. Include every relevant user when using `all-selected`; users outside that list are not checked.
 
-### Jellyfin
-The script also supports Jellyfin libraries. Episodes are identified and filtered based on their watch status and date.
+Plex uses `PLEX_LIBRARY` (default: `TV Shows`). With `DEFAULT_DELETE=false`, only shows with the `Delete` genre qualify. With `DEFAULT_DELETE=true`, shows qualify unless protected by `Keep`. **Keep always wins**, including when a show also has `Delete`. Episode playback state is evaluated locally rather than relying on show-level filters. Duplicate or ambiguous TVDB mappings are retained.
 
+Jellyfin requires explicit `IsFavorite=false` on both the series and episode, `Played=true`, a timezone-aware played timestamp, and a zero playback position. Missing metadata is conservative. Paging requires consistent counts, offsets and unique item IDs; inconsistent responses stop the run. Favourite protection applies to every selected user.
 
-## Usage
+## Apply a bounded plan
 
-1. Run the script: `python delete_watched_episodes.py`
-2. The script will:
-   - Connect to your configured media service (Plex or Jellyfin)
-   - Connect to Sonarr
-   - Find watched episodes older than the specified number of days
-   - Unmonitor and delete those episodes from Sonarr
-   - Log all actions to the specified LOG_FILE
-   - Schedule repeated runs via cron/systemd or your orchestrator of choice
+Review a preview before running:
 
-### Adding Shows to Delete or Keep Lists
+```sh
+.venv/bin/python src/delete_watched_episodes.py --apply --max-files 10 --max-bytes 10000000000
+```
 
-#### For Plex:
-You can use the "Keep" or "Delete" genres in Plex to control which shows are deleted:
-- When `DEFAULT_DELETE` is set to `true`: Episodes with the "Keep" genre will be excluded from deletion
-- When `DEFAULT_DELETE` is set to `false`: Only episodes with the "Delete" genre will be deleted
+The default limits are 10 files and 10 GB (decimal bytes). Configure them with `MAX_FILES` and `MAX_BYTES` in `.env`, or override each with its CLI flag. A value of `0` disables that limit independently. Negative or malformed values stop the run before network discovery.
 
-#### For Jellyfin:
-Episodes are automatically identified as watched in Jellyfin and deleted based on their watch date and the `DAYS_TO_DELETE` setting. To prevent a series from being deleted, mark it as a favorite in Jellyfin and it will be skipped from the deletion logic.
+To disable both caps in `.env`:
 
-## Note
+```dotenv
+MAX_FILES=0
+MAX_BYTES=0
+```
 
-- This script assumes you have both Sonarr and either Plex or Jellyfin set up and running with your media library managed by Sonarr.
-- Ensure that you have set the correct permissions and configurations in both your media service and Sonarr before running this script.
-- All deletions are logged to the specified LOG_FILE for your records.
+Or for one apply invocation:
 
-## Logging
+```sh
+.venv/bin/python src/delete_watched_episodes.py --apply --max-files 0 --max-bytes 0
+```
 
-The script logs all actions to the file specified in the `LOG_FILE` environment variable using weekly rotation (`W0`, Monday midnight) and retains `LOG_RETENTION_WEEKS` backups.  
-Each log entry includes a timestamp and a description of the action performed (episode deletion, season unmonitoring, etc.). If no episodes are found to delete, this is also logged.
+The JSON report and file log show the effective limits. If the complete plan exceeds either enabled limit, the run makes no mutations; it never silently deletes a truncated subset. Preview remains available when the plan exceeds apply limits. Disabling caps leaves explicit apply, eligibility, metadata and revalidation checks in effect.
 
-## Scheduling
+Each physical file is planned once. Every episode in that file must qualify. Incomplete, duplicate or contradictory Sonarr episode metadata skips the entire series. A valid file ID, series ID, path, size and import date are required for planning.
 
-Use cron, a service manager (systemd), or a container/job scheduler to run this script at the interval you need.
+Before unmonitoring, and again before deletion, the runner refreshes media watch eligibility, the Sonarr series mapping, every episode's file membership and the file fingerprint. Changed or unavailable evidence stops further operations. Full media discovery during these checks favours conservative decisions and can be slow for large libraries.
+
+Only the selected file's episodes are unmonitored. The runner never unmonitors a whole season, empties library trash or triggers a library-wide refresh. It does not infer season completion from the last numbered episode.
+
+## Outcomes and remaining limits
+
+The command prints JSON to stdout and exits 1 on configuration errors, discovery failures, blocked applies or partial results. Apply results include `deleted`, `blocked` (no mutation attempted for that file), `unconfirmed` (a mutation was attempted), and `not_attempted`. Partial reports identify the phase and number of confirmed unmonitor calls. Sonarr calls have bounded timeouts, reject unexpected HTTP statuses and do not retry or follow redirects.
+
+Unmonitoring and deletion are separate remote actions. An error or a changed eligibility check after unmonitoring can leave episodes unmonitored with their file still present. A timeout can happen after Sonarr completed a deletion. Inspect Sonarr and the media server before any later apply; the runner does not automatically restore monitoring or retry mutations.
+
+This PR remains a draft for supervised use. It does not provide a cross-provider transaction, a persistent operation journal, a process lock, or crash recovery. Another process or user can change state after the final check. Do not run concurrent applies or add apply to an unattended schedule yet. No live library compatibility check has been performed.
+
+Apply performs new discovery rather than applying a saved, approved plan. The set of proposed files can differ from an earlier preview. Existing schedules that invoke the script without arguments now preview only, and need the explicit watch-policy configuration.
+
+## Rotating logs
+
+JSON reports continue to go to stdout. File logging preserves the original environment settings:
+
+| Setting | Default | Behaviour |
+| --- | --- | --- |
+| `LOG_FILE` | `output/log.txt` | Append to this file, creating its parent directory when the command runs. |
+| `LOG_LEVEL` | `INFO` | Standard Python level, case-insensitive. Run starts and successful reports use INFO; stopped or partial runs use ERROR. |
+| `LOG_RETENTION_WEEKS` | `4` | Keep up to this many weekly rotated backups. `0` keeps all backups. |
+
+Rotation is due on Monday at midnight in the process's local timezone and happens on the next log write. The timestamp and level prefix retain the original format. Reports in the file include proposed/deleted files, exclusions and partial outcomes; stdout remains plain JSON regardless of `LOG_LEVEL`.
+
+Logging is initialized inside `main()`. Importing modules or requesting `--help` creates no directories or handlers. Each invocation closes its handler; SDK/root logger settings are left alone. Preview writes local logs while remaining read-only against the remote libraries. Invalid logging settings or an unusable log path stop cleanup before network discovery.
+
+The file contains sanitized reports rather than raw SDK exception messages or authentication values. Do not enable SDK debug logging with production credentials. These logs are not a durable operation journal or a concurrency lock; inspect remote state after uncertain outcomes.
+
+## Container
+
+```sh
+docker build -t sonarr-cleanup .
+docker run --rm --env-file .env -v "$PWD/output:/app/output" sonarr-cleanup
+docker run --rm --env-file .env -v "$PWD/output:/app/output" sonarr-cleanup --apply --max-files 10 --max-bytes 10000000000
+```
+
+The container defaults to preview. Credentials, local environments, logs and tests are excluded from the image; configuration is supplied at runtime.
+
+The volume above preserves logs when the container is removed. If you change `LOG_FILE`, mount its directory at the corresponding container path.
+
+## Development
+
+Application code lives in `src/`. Automated tests and their provider fixtures live in `test/` and `test/fixtures/`. The small root-level `delete_watched_episodes.py` launcher preserves existing script commands and schedules.
+
+```sh
+.venv/bin/pip install -r requirements-dev.txt
+.venv/bin/python -m pytest -q test
+.venv/bin/ruff check .
+.venv/bin/ruff format --check .
+```
+
+Tests use synthetic Plex XML and Jellyfin/Sonarr JSON fixtures. They exercise the pinned clients at their parsing or HTTP boundary without querying real libraries. Coverage includes shared files, retention boundaries, favourites, all-selected users, duplicate mappings, inconsistent pagination, replaced files, changed watch state, deletion limits, uncertain outcomes, rotating-log retention and import-safe logging. CI runs tests and formatting on Python 3.11–3.14, plus a container startup smoke test.
+
+Provider references: [PlexAPI library filtering](https://python-plexapi.readthedocs.io/en/latest/modules/library.html), [Jellyfin user data](https://typescript-sdk.jellyfin.org/interfaces/generated-client.UserItemDataDto.html), and [Sonarr API](https://sonarr.tv/docs/api/).
+
+The existing licence is unchanged. See [LICENSE.md](LICENSE.md).

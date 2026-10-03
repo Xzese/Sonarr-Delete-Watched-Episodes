@@ -1,0 +1,15 @@
+{
+  "series": {
+    "Items": [{"Id": "series-a", "ProviderIds": {"Tvdb": "99"}, "UserData": {"IsFavorite": false}}],
+    "TotalRecordCount": 1,
+    "StartIndex": 0
+  },
+  "episodes": {
+    "Items": [
+      {"Id": "episode-a", "SeriesId": "series-a", "ProviderIds": {"Tvdb": "101"}, "UserData": {"Played": true, "IsFavorite": false, "PlaybackPositionTicks": 0, "LastPlayedDate": "2025-01-01T12:00:00Z"}},
+      {"Id": "episode-b", "SeriesId": "series-a", "ProviderIds": {"Tvdb": "102"}, "UserData": {"Played": true, "IsFavorite": false, "PlaybackPositionTicks": 0, "LastPlayedDate": "2025-01-01T12:00:00Z"}}
+    ],
+    "TotalRecordCount": 2,
+    "StartIndex": 0
+  }
+}

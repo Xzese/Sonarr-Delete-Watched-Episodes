@@ -1,5 +1,6 @@
-FROM python:3.12.0-slim
+FROM python:3.12-slim
 WORKDIR /app
-COPY . .
+COPY requirements.txt .
 RUN pip install --no-cache-dir -r requirements.txt
-CMD [ "python", "delete_watched_episodes.py" ]
+COPY src/ ./src/
+ENTRYPOINT ["python", "src/delete_watched_episodes.py"]
