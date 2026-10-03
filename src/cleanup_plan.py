@@ -137,10 +137,11 @@ def execute_plans(
 
     Revalidation is mandatory for apply. It is read-only and must refresh media
     eligibility and Sonarr series mapping. There is no cross-provider transaction.
+    A zero limit disables only that cap.
     """
     for name, limit in (("max_files", max_files), ("max_bytes", max_bytes)):
-        if isinstance(limit, bool) or not isinstance(limit, int) or limit < 1:
-            raise CleanupError(f"{name} must be a positive integer.")
+        if isinstance(limit, bool) or not isinstance(limit, int) or limit < 0:
+            raise CleanupError(f"{name} must be a non-negative integer; 0 disables that limit.")
     plans = tuple(plans)
     if len({p.file_id for p in plans}) != len(plans):
         raise CleanupError("Duplicate file operations are not permitted.")
@@ -153,7 +154,9 @@ def execute_plans(
         ]
     if revalidate is None or any(p.identity is None for p in plans):
         raise CleanupError("Apply requires file fingerprints and fresh provider revalidation.")
-    if len(plans) > max_files or sum(p.identity.size for p in plans) > max_bytes:
+    if (max_files > 0 and len(plans) > max_files) or (
+        max_bytes > 0 and sum(p.identity.size for p in plans) > max_bytes
+    ):
         raise CleanupError("The plan exceeds a deletion limit. No changes were made.")
 
     def check(plan):

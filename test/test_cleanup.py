@@ -144,7 +144,7 @@ def test_byte_limit_checked_before_any_mutation(client, sonarr_data):
     assert client.mock_calls == []
 
 
-@pytest.mark.parametrize("limit", [True, 0, -1, 1.5])
+@pytest.mark.parametrize("limit", [True, False, -1, 1.5])
 def test_invalid_limits_rejected(limit):
     with pytest.raises(ValueError):
         execute_plans(Mock(), [], max_files=limit)

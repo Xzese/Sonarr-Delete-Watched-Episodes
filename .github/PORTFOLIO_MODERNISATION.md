@@ -6,7 +6,7 @@ Status: guarded implementation with automated provider fixtures; keep this PR in
 
 - Import-safe command entry point, JSON preview by default and explicit `--apply`.
 - Separate pure planner and mutation boundary with operation details and exclusion reasons.
-- File and byte limits checked across the complete plan before mutation.
+- File and byte limits checked across the complete plan before mutation; `MAX_FILES`/`MAX_BYTES` and CLI overrides support `0` to disable each cap independently.
 - Physical-file grouping; every contained episode must qualify.
 - Conservative missing, duplicate and contradictory metadata handling.
 - Sonarr series, episode membership and file fingerprint rechecks.

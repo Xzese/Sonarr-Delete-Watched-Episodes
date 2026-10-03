@@ -42,7 +42,22 @@ Review a preview before running:
 .venv/bin/python src/delete_watched_episodes.py --apply --max-files 10 --max-bytes 10000000000
 ```
 
-The default limits are 10 files and 10 GB (decimal bytes). If the complete plan exceeds either limit, the run makes no mutations; it never silently deletes a truncated subset. Preview remains available when the plan exceeds apply limits.
+The default limits are 10 files and 10 GB (decimal bytes). Configure them with `MAX_FILES` and `MAX_BYTES` in `.env`, or override each with its CLI flag. A value of `0` disables that limit independently. Negative or malformed values stop the run before network discovery.
+
+To disable both caps in `.env`:
+
+```dotenv
+MAX_FILES=0
+MAX_BYTES=0
+```
+
+Or for one apply invocation:
+
+```sh
+.venv/bin/python src/delete_watched_episodes.py --apply --max-files 0 --max-bytes 0
+```
+
+The JSON report and file log show the effective limits. If the complete plan exceeds either enabled limit, the run makes no mutations; it never silently deletes a truncated subset. Preview remains available when the plan exceeds apply limits. Disabling caps leaves explicit apply, eligibility, metadata and revalidation checks in effect.
 
 Each physical file is planned once. Every episode in that file must qualify. Incomplete, duplicate or contradictory Sonarr episode metadata skips the entire series. A valid file ID, series ID, path, size and import date are required for planning.
 

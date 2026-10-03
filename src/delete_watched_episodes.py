@@ -374,6 +374,17 @@ def sonarr_match(client, tvdb_id):
     return positive_id(match.get("id"))
 
 
+def deletion_limit(cli_value, env, name, default):
+    if cli_value is not None:
+        if cli_value < 0:
+            raise CleanupError(f"{name} must be a non-negative integer; 0 disables that limit.")
+        return cli_value
+    raw = env.get(name, str(default))
+    if not isinstance(raw, str) or not raw.isascii() or not raw.isdigit():
+        raise CleanupError(f"{name} must be a non-negative integer; 0 disables that limit.")
+    return int(raw)
+
+
 def main(argv=None, *, env=None, discover=None, client_factory=None):
     parser = argparse.ArgumentParser(description=__doc__)
     parser.add_argument(
@@ -382,13 +393,14 @@ def main(argv=None, *, env=None, discover=None, client_factory=None):
         help="Permit unmonitoring and deletion. Default is read-only.",
     )
     parser.add_argument(
-        "--max-files", type=int, default=10, help="Maximum files allowed in one apply run."
+        "--max-files",
+        type=int,
+        help="Maximum files in one apply run (MAX_FILES or 10). 0 disables this limit.",
     )
     parser.add_argument(
         "--max-bytes",
         type=int,
-        default=10_000_000_000,
-        help="Maximum bytes allowed in one apply run (default: 10 GB).",
+        help="Maximum bytes in one apply run (MAX_BYTES or 10 GB). 0 disables this limit.",
     )
     args = parser.parse_args(argv)
     mode = "apply" if args.apply else "preview"
@@ -408,8 +420,8 @@ def main(argv=None, *, env=None, discover=None, client_factory=None):
         env = dict(env)
         logger, log_handler = configure_logging(env)
         logger.info("Cleanup %s started.", mode)
-        if args.max_files < 1 or args.max_bytes < 1:
-            raise CleanupError("Deletion limits must be positive.")
+        max_files = deletion_limit(args.max_files, env, "MAX_FILES", 10)
+        max_bytes = deletion_limit(args.max_bytes, env, "MAX_BYTES", 10_000_000_000)
         validate_config(env)
         discover = discover or discover_eligible
         eligible = discover(env)
@@ -445,8 +457,8 @@ def main(argv=None, *, env=None, discover=None, client_factory=None):
             client,
             plans,
             apply=args.apply,
-            max_files=args.max_files,
-            max_bytes=args.max_bytes,
+            max_files=max_files,
+            max_bytes=max_bytes,
             revalidate=revalidate,
         )
         report_result(
@@ -454,6 +466,7 @@ def main(argv=None, *, env=None, discover=None, client_factory=None):
                 "mode": mode,
                 "planned_files": len(plans),
                 "planned_bytes": sum(p.identity.size for p in plans),
+                "limits": {"max_files": max_files, "max_bytes": max_bytes},
                 "results": results,
                 "exclusions": exclusions,
             }
