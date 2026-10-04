@@ -126,6 +126,199 @@ def jellyfin_client(monkeypatch, data_by_user):
     return client
 
 
+@pytest.fixture
+def fallback_library(env, client, sonarr_data, jellyfin_data, monkeypatch):
+    env["MEDIA_SERVICE"] = "jellyfin"
+    show = jellyfin_data["series"]["Items"][0]
+    show.update(Path="/jellyfin/Fixture", Name="Fixture")
+    show["ProviderIds"]["Imdb"] = "tt1234567"
+    series = sonarr_data["series"][0]
+    series.update(path="/sonarr/Fixture", imdbId="tt1234567")
+    files = []
+    for number, (episode, sonarr_episode) in enumerate(
+        zip(jellyfin_data["episodes"]["Items"], sonarr_data["episodes"]), 1
+    ):
+        relative = f"Season 1/Fixture S01E{number:02}.mkv"
+        path = f"/jellyfin/Fixture/{relative}"
+        episode.update(
+            Name=f"Episode {number}",
+            ParentIndexNumber=1,
+            IndexNumber=number,
+            Path=path,
+            MediaSources=[{"Path": path, "Size": 1000, "IsRemote": False}],
+        )
+        sonarr_episode.update(seasonNumber=1, episodeNumber=number, episodeFileId=9 + number)
+        files.append(
+            {
+                **sonarr_data["file"],
+                "id": 9 + number,
+                "path": f"/sonarr/Fixture/{relative}",
+                "relativePath": relative,
+            }
+        )
+    jellyfin_data["episodes"]["Items"][0]["ProviderIds"].pop("Tvdb")
+    client.get_series.side_effect = lambda **kwargs: deepcopy(sonarr_data["series"])
+    client.get_episode.side_effect = lambda **kwargs: deepcopy(sonarr_data["episodes"])
+    client.get_episode_file.side_effect = lambda id_, series=False: (
+        deepcopy(files) if series else deepcopy(next(f for f in files if f["id"] == id_))
+    )
+    jellyfin_client(monkeypatch, {"a" * 32: jellyfin_data})
+    return jellyfin_data, sonarr_data, files
+
+
+@pytest.mark.parametrize("missing", ["episode", "series", "both"])
+def test_jellyfin_fallback_preview_matches_files_across_container_roots(
+    env, client, fallback_library, capsys, missing
+):
+    data, _, _ = fallback_library
+    if missing in {"series", "both"}:
+        data["series"]["Items"][0]["ProviderIds"].pop("Tvdb")
+    if missing == "series":
+        data["episodes"]["Items"][0]["ProviderIds"]["Tvdb"] = "101"
+    assert runner.main(["--json"], env=env, client_factory=lambda *args: client) == 0
+    report = json.loads(capsys.readouterr().out)
+    assert report["planned_files"] == 2
+    assert {r["file_id"] for r in report["results"]} == {10, 11}
+    assert all(r["status"] == "preview" for r in report["results"])
+    assert not report["exclusions"]
+    client.upd_episode.assert_not_called()
+    client.del_episode_file.assert_not_called()
+
+
+@pytest.mark.parametrize(
+    "problem",
+    [
+        "size",
+        "path",
+        "number",
+        "range",
+        "series-duplicate",
+        "episode-duplicate",
+        "file-duplicate",
+        "shared-file",
+        "conflicting-id",
+    ],
+)
+def test_jellyfin_fallback_refuses_incomplete_or_ambiguous_identity(
+    env, client, fallback_library, capsys, problem
+):
+    data, sonarr, files = fallback_library
+    episode = data["episodes"]["Items"][0]
+    data["episodes"]["Items"][1]["UserData"]["Played"] = False
+    if problem == "size":
+        episode["MediaSources"][0]["Size"] += 1
+    elif problem == "path":
+        episode["Path"] = episode["MediaSources"][0]["Path"] = "/jellyfin/Fixture/other.mkv"
+    elif problem == "number":
+        episode["IndexNumber"] = 2
+    elif problem == "range":
+        episode["IndexNumberEnd"] = 2
+    elif problem == "series-duplicate":
+        sonarr["series"].append({**sonarr["series"][0], "id": 6})
+    elif problem == "episode-duplicate":
+        sonarr["episodes"].append({**sonarr["episodes"][0], "id": 3, "tvdbId": 103})
+    elif problem == "file-duplicate":
+        files.append({**files[0], "id": 12})
+    elif problem == "shared-file":
+        sonarr["episodes"][1]["episodeFileId"] = 10
+    else:
+        data["series"]["Items"][0]["ProviderIds"].pop("Tvdb")
+        episode["ProviderIds"]["Tvdb"] = "999"
+    assert runner.main(["--json", "--apply"], env=env, client_factory=lambda *args: client) == 0
+    report = json.loads(capsys.readouterr().out)
+    assert report["planned_files"] == 0
+    assert report["results"] == []
+    client.upd_episode.assert_not_called()
+    client.del_episode_file.assert_not_called()
+
+
+@pytest.mark.parametrize(
+    "duplicate_identity",
+    ["missing-id", "tvdb", "conflicting-number", "conflicting-id", "incomplete-source"],
+)
+def test_jellyfin_fallback_unwatched_duplicate_blocks_deletion(
+    env, client, fallback_library, capsys, duplicate_identity
+):
+    data, _, _ = fallback_library
+    data["episodes"]["Items"][1]["UserData"]["Played"] = False
+    duplicate = deepcopy(data["episodes"]["Items"][0])
+    duplicate["Id"] = "duplicate-item"
+    duplicate["UserData"]["Played"] = False
+    if duplicate_identity == "tvdb":
+        duplicate["ProviderIds"]["Tvdb"] = "101"
+    elif duplicate_identity == "conflicting-number":
+        duplicate["IndexNumber"] = 2
+    elif duplicate_identity == "conflicting-id":
+        duplicate["ProviderIds"]["Tvdb"] = "999"
+    elif duplicate_identity == "incomplete-source":
+        duplicate.pop("MediaSources")
+    data["episodes"]["Items"].append(duplicate)
+    data["episodes"]["TotalRecordCount"] = 3
+    assert runner.main(["--json", "--apply"], env=env, client_factory=lambda *args: client) == 0
+    report = json.loads(capsys.readouterr().out)
+    assert report["planned_files"] == 0
+    assert any("duplicate" in reason for reason in report["exclusions"])
+    client.upd_episode.assert_not_called()
+    client.del_episode_file.assert_not_called()
+
+
+@pytest.mark.parametrize("second_state", ["watched", "unwatched", "conflicting-series"])
+def test_jellyfin_fallback_all_selected_requires_every_user(
+    env, client, fallback_library, monkeypatch, capsys, second_state
+):
+    data, _, _ = fallback_library
+    data["series"]["Items"][0]["ProviderIds"].pop("Tvdb")
+    data["episodes"]["Items"][1]["UserData"]["Played"] = False
+    second = deepcopy(data)
+    second["episodes"]["Items"][0]["UserData"]["Played"] = second_state != "unwatched"
+    if second_state == "conflicting-series":
+        second["series"]["Items"][0]["ProviderIds"]["Imdb"] = "tt7654321"
+    env.pop("JELLYFIN_USER_ID")
+    env.update(WATCH_POLICY="all-selected", JELLYFIN_USER_IDS=f"{'a' * 32},{'b' * 32}")
+    jellyfin_client(monkeypatch, {"a" * 32: data, "b" * 32: second})
+    assert runner.main(["--json"], env=env, client_factory=lambda *args: client) == 0
+    report = json.loads(capsys.readouterr().out)
+    assert report["planned_files"] == int(second_state == "watched")
+    client.upd_episode.assert_not_called()
+    client.del_episode_file.assert_not_called()
+
+
+@pytest.mark.parametrize("when", ["before-unmonitor", "before-delete"])
+def test_jellyfin_fallback_revalidates_file_evidence_before_each_mutation(
+    env, client, fallback_library, capsys, when
+):
+    data, _, _ = fallback_library
+    episode = data["episodes"]["Items"][0]
+    data["episodes"]["Items"][1]["UserData"]["Played"] = False
+    if when == "before-unmonitor":
+        original_get = client.get_episode_file.side_effect
+
+        def get_file(id_, series=False):
+            result = original_get(id_, series=series)
+            if not series:
+                episode["MediaSources"][0]["Size"] += 1
+            return result
+
+        client.get_episode_file.side_effect = get_file
+    else:
+
+        def update(id_, payload):
+            episode["MediaSources"][0]["Size"] += 1
+            return {"id": id_, **payload}
+
+        client.upd_episode.side_effect = update
+    assert runner.main(["--json", "--apply"], env=env, client_factory=lambda *args: client) == 1
+    report = json.loads(capsys.readouterr().out)
+    assert report["results"][0]["status"] == (
+        "blocked" if when == "before-unmonitor" else "unconfirmed"
+    )
+    client.del_episode_file.assert_not_called()
+    if when == "before-unmonitor":
+        client.upd_episode.assert_not_called()
+    else:
+        assert report["results"][0]["unmonitor_calls_confirmed"] == 1
+
+
 def test_jellyfin_fixture_and_user_specific_query(env, jellyfin_data, monkeypatch):
     client = jellyfin_client(monkeypatch, {"a" * 32: jellyfin_data})
     assert runner.discover_jellyfin(env, 2) == {99: {101, 102}}

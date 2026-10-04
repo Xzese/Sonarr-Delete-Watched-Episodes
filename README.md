@@ -34,6 +34,12 @@ Plex uses `PLEX_LIBRARY` (default: `TV Shows`). With `DEFAULT_DELETE=false`, onl
 
 Jellyfin requires explicit `IsFavorite=false` on both the series and episode, `Played=true`, a timezone-aware played timestamp, and a zero playback position. Missing metadata is conservative. Paging requires consistent counts, offsets and unique item IDs; inconsistent responses stop the run. Favourite protection applies to every selected user.
 
+When Jellyfin lacks a series or episode TVDB ID, the runner can borrow the episode TVDB ID from Sonarr after watch checks pass. It requires a unique Sonarr series match by series TVDB ID, or by IMDb ID when the series TVDB ID is missing. A present episode TVDB ID must agree with Sonarr; identifiers are not overwritten. Episode titles, air dates and TMDB IDs are not used to guess matches.
+
+The fallback requires matching season/episode numbers, an exact file path relative to each service's series directory, and an exact positive byte size from a single local Jellyfin media source. This permits different container mount roots without matching by basename alone. Paths must be absolute POSIX paths without parent traversal. Missing or inconsistent metadata, multiple matches, ranges, multiple media sources and Sonarr files containing multiple episodes are retained. An inferred candidate is also retained if another Jellyfin item references its file path, even if that item's identifiers or numbering cannot be resolved.
+
+Fallback lookups are read-only and cached only during one discovery. Each apply revalidation performs fresh matching before unmonitoring and again before deletion. Every selected Jellyfin user must independently qualify when using `all-selected`; native and inferred mappings participate in the same duplicate checks.
+
 ## Apply a bounded plan
 
 Review a preview before running:
@@ -85,7 +91,7 @@ Readable activity messages go to both stdout and the rotating log file. Use `--j
 | `LOG_LEVEL` | `INFO` | Standard Python level, case-insensitive. Run starts, previews and confirmed deletions use INFO; actionable metadata problems use WARNING; stopped or partial runs use ERROR. |
 | `LOG_RETENTION_WEEKS` | `4` | Keep up to this many weekly rotated backups. `0` keeps all backups. |
 
-Rotation is due on Monday at midnight in the process's local timezone and happens on the next log write. The timestamp and level prefix retain the original format. The file records run starts, proposed or confirmed deletions, actionable metadata problems, errors and completion summaries. Jellyfin metadata warnings are emitted only for episodes that pass watch, favourite and retention checks. Missing TVDB warnings include episode and series names. Duplicate mappings are still checked across all episodes, including unwatched copies, and warned about when they block an otherwise eligible episode. Routine watch eligibility, favourites and retention exclusions are not logged. `LOG_LEVEL` filters the file; console activity or optional JSON output remains available regardless of that setting.
+Rotation is due on Monday at midnight in the process's local timezone and happens on the next log write. The timestamp and level prefix retain the original format. The file records run starts, proposed or confirmed deletions, actionable metadata problems, errors and completion summaries. Jellyfin metadata warnings are emitted only for episodes that pass watch, favourite and retention checks. Unresolved TVDB warnings include episode and series names and indicate that no unambiguous Sonarr file fallback was available. Duplicate mappings are still checked across all episodes, including unwatched copies, and warned about when they block an otherwise eligible episode. Routine watch eligibility, favourites and retention exclusions are not logged. `LOG_LEVEL` filters the file; console activity or optional JSON output remains available regardless of that setting.
 
 Logging is initialized inside `main()`. Importing modules or requesting `--help` creates no directories or handlers. Each invocation closes its handler; SDK/root logger settings are left alone. Preview writes local logs while remaining read-only against the remote libraries. Invalid logging settings or an unusable log path stop cleanup before network discovery.
 

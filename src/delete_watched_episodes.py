@@ -11,6 +11,7 @@ from urllib.parse import urlparse
 from uuid import UUID
 
 from cleanup_plan import CleanupError, attach_file_metadata, execute_plans, plan_series, positive_id
+from jellyfin_match import JellyfinMatcher, relative_path, tvdb_id
 from run_logging import configure_logging, log_report
 from sonarr_client import create_sonarr_client
 
@@ -251,25 +252,31 @@ def jellyfin_items(client, user_id, params):
             break
 
 
-def _jellyfin_user_eligibility(client, user_id, cutoff):
+def _jellyfin_user_eligibility(client, user_id, cutoff, fallback=None):
     series = list(
         jellyfin_items(
             client,
             user_id,
-            {"Recursive": "true", "IncludeItemTypes": "Series", "Fields": "ProviderIds"},
+            {"Recursive": "true", "IncludeItemTypes": "Series", "Fields": "ProviderIds,Path"},
         )
     )
     series_by_id = {show["Id"]: show for show in series}
-    shows, seen_series_tvdb, ambiguous_series = {}, set(), set()
-    for show in series:
-        try:
-            tvdb = positive_id(show.get("ProviderIds", {}).get("Tvdb"))
-        except ValueError:
-            continue
-        if tvdb in seen_series_tvdb:
-            ambiguous_series.add(tvdb)
-        seen_series_tvdb.add(tvdb)
-        shows[show["Id"]] = (tvdb, show)
+    resolved, inferred = {}, set()
+
+    def mapping(episode):
+        if episode["Id"] not in resolved:
+            show = series_by_id.get(episode.get("SeriesId"))
+            series_id = tvdb_id((show.get("ProviderIds") or {}).get("Tvdb")) if show else None
+            episode_id = tvdb_id((episode.get("ProviderIds") or {}).get("Tvdb"))
+            if series_id and episode_id:
+                result = (series_id, episode_id)
+            else:
+                result = fallback.match(show, episode) if fallback and show else None
+                if result is not None:
+                    inferred.add(episode["Id"])
+            resolved[episode["Id"]] = result
+        return resolved[episode["Id"]]
+
     eligible = Eligibility()
     episodes = list(
         jellyfin_items(
@@ -278,7 +285,7 @@ def _jellyfin_user_eligibility(client, user_id, cutoff):
             {
                 "Recursive": "true",
                 "IncludeItemTypes": "Episode",
-                "Fields": "ProviderIds",
+                "Fields": "ProviderIds,Path,MediaSources",
                 "IsMissing": "false",
             },
         )
@@ -288,14 +295,12 @@ def _jellyfin_user_eligibility(client, user_id, cutoff):
         data = episode.get("UserData")
         show_data = series_by_id.get(episode.get("SeriesId"))
         show_user_data = show_data.get("UserData") if show_data is not None else None
-        if not isinstance(data, dict) or (
-            show_data is not None and not isinstance(show_user_data, dict)
-        ):
+        if not isinstance(data, dict) or not isinstance(show_user_data, dict):
             eligible.exclusions.append(f"{identity} retained: missing user metadata.")
             continue
         played = get_last_played_timestamp(data)
         if (
-            (show_user_data is not None and show_user_data.get("IsFavorite") is not False)
+            show_user_data.get("IsFavorite") is not False
             or data.get("IsFavorite") is not False
             or data.get("Played") is not True
             or type(data.get("PlaybackPositionTicks")) is not int
@@ -309,52 +314,59 @@ def _jellyfin_user_eligibility(client, user_id, cutoff):
             continue
 
         # Check watch eligibility before validating TVDB metadata or warning.
-        show = shows.get(episode.get("SeriesId"))
-        try:
-            episode_id = positive_id(episode.get("ProviderIds", {}).get("Tvdb"))
-        except ValueError:
+        match = mapping(episode)
+        if match is None:
             episode_name = episode.get("Name") or episode["Id"]
             season, number = episode.get("ParentIndexNumber"), episode.get("IndexNumber")
             if type(season) is int and type(number) is int:
                 episode_name = f"{episode_name} (S{season:02}E{number:02})"
             series_name = (
-                (show[1].get("Name") if show else None)
+                show_data.get("Name")
                 or episode.get("SeriesName")
                 or episode.get("SeriesId")
                 or "unknown series"
             )
-            eligible.exclusions.append(
-                f"Skipping Jellyfin episode '{episode_name}' in series '{series_name}': "
-                "missing episode TVDB identifier."
-            )
+            episode_id = tvdb_id((episode.get("ProviderIds") or {}).get("Tvdb"))
+            if episode_id is None:
+                eligible.exclusions.append(
+                    f"Skipping Jellyfin episode '{episode_name}' in series '{series_name}': "
+                    "missing episode TVDB identifier; no unambiguous Sonarr file fallback."
+                )
+            else:
+                eligible.exclusions.append(
+                    f"Jellyfin episode {episode_id} retained: no series TVDB mapping "
+                    "or unambiguous Sonarr file fallback."
+                )
             continue
-        if show is None:
-            eligible.exclusions.append(
-                f"Jellyfin episode {episode_id} retained: no series TVDB mapping."
-            )
-            continue
-        series_id, _ = show
-        if series_id in ambiguous_series:
-            eligible.exclusions.append(
-                f"Jellyfin series {series_id} retained: duplicate series TVDB mapping."
-            )
-            continue
+        series_id, episode_id = match
         eligible.setdefault(series_id, set()).add(episode_id)
+    if not eligible:
+        return eligible
     # Audit every mapping, including unwatched copies, so an eligible episode
     # cannot bypass duplicate protection. Only blocked candidates need warnings.
     seen, duplicates = set(), set()
     for episode in episodes:
-        show = shows.get(episode.get("SeriesId"))
-        if show is None:
+        match = mapping(episode)
+        if match is None:
             continue
-        try:
-            episode_id = positive_id(episode.get("ProviderIds", {}).get("Tvdb"))
-        except ValueError:
-            continue
-        key = (show[0], episode_id)
-        if key in seen:
-            duplicates.add(key)
-        seen.add(key)
+        if match in seen:
+            duplicates.add(match)
+        seen.add(match)
+    seen_series, ambiguous_series = set(), set()
+    for show in series:
+        series_id = tvdb_id((show.get("ProviderIds") or {}).get("Tvdb"))
+        if series_id is None and fallback:
+            match = fallback.series(show)
+            series_id = tvdb_id(match.get("tvdbId")) if match else None
+        if series_id is not None:
+            if series_id in seen_series:
+                ambiguous_series.add(series_id)
+            seen_series.add(series_id)
+    for series_id in ambiguous_series:
+        if eligible.pop(series_id, None):
+            eligible.exclusions.append(
+                f"Jellyfin series {series_id} retained: duplicate series TVDB mapping."
+            )
     for series_id, episode_id in duplicates:
         candidates = eligible.get(series_id, set())
         if episode_id in candidates:
@@ -362,10 +374,31 @@ def _jellyfin_user_eligibility(client, user_id, cutoff):
             eligible.exclusions.append(
                 f"Jellyfin series {series_id}, episode {episode_id} retained: duplicate TVDB mapping."
             )
+    # A conflicting/unmapped copy must not disappear from the duplicate
+    # audit simply because its provider IDs or numbering cannot be resolved.
+    seen_paths, duplicate_paths = set(), set()
+    for episode in episodes:
+        path = relative_path(episode.get("Path"), "/")
+        if path is not None:
+            if path in seen_paths:
+                duplicate_paths.add(path)
+            seen_paths.add(path)
+    for episode in episodes:
+        if episode["Id"] not in inferred:
+            continue
+        if relative_path(episode.get("Path"), "/") in duplicate_paths:
+            series_id, episode_id = resolved[episode["Id"]]
+            candidates = eligible.get(series_id, set())
+            if episode_id in candidates:
+                candidates.discard(episode_id)
+                eligible.exclusions.append(
+                    f"Jellyfin series {series_id}, episode {episode_id} retained: "
+                    "duplicate Jellyfin file mapping."
+                )
     return eligible
 
 
-def discover_jellyfin(env, days):
+def discover_jellyfin(env, days, *, sonarr_client=None):
     users = jellyfin_users(env)
     url, token = require_url(env, "JELLYFIN_URL"), require_env(env, "JELLYFIN_TOKEN")
     from jellyfin_apiclient_python import JellyfinClient
@@ -379,9 +412,10 @@ def discover_jellyfin(env, days):
         raise CleanupError("Jellyfin authentication failed.")
     cutoff = datetime.now(timezone.utc) - timedelta(days=days)
     combined = None
+    fallback = JellyfinMatcher(sonarr_client) if sonarr_client is not None else None
     try:
         for user_id in users:
-            selected = _jellyfin_user_eligibility(client, user_id, cutoff)
+            selected = _jellyfin_user_eligibility(client, user_id, cutoff, fallback)
             if combined is None:
                 combined = selected
             else:
@@ -393,13 +427,13 @@ def discover_jellyfin(env, days):
     return combined
 
 
-def discover_eligible(env):
+def discover_eligible(env, *, sonarr_client=None):
     days = retention_days(env)
     service = env.get("MEDIA_SERVICE", "plex").lower()
     if service == "plex":
         return discover_plex(env, days)
     if service == "jellyfin":
-        return discover_jellyfin(env, days)
+        return discover_jellyfin(env, days, sonarr_client=sonarr_client)
     raise CleanupError("MEDIA_SERVICE must be plex or jellyfin.")
 
 
@@ -472,11 +506,15 @@ def main(argv=None, *, env=None, discover=None, client_factory=None):
         max_files = deletion_limit(args.max_files, env, "MAX_FILES", 10)
         max_bytes = deletion_limit(args.max_bytes, env, "MAX_BYTES", 10_000_000_000)
         validate_config(env)
-        discover = discover or discover_eligible
-        eligible = discover(env)
         client = (client_factory or create_sonarr_client)(
             require_url(env, "SONARR_URL"), require_env(env, "SONARR_KEY")
         )
+        if discover is None:
+
+            def discover(env):
+                return discover_eligible(env, sonarr_client=client)
+
+        eligible = discover(env)
         plans, exclusions, series_tvdb = [], list(getattr(eligible, "exclusions", [])), {}
         for tvdb_id, episode_ids in sorted(eligible.items()):
             tvdb_id = positive_id(tvdb_id)
