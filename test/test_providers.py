@@ -163,6 +163,48 @@ def test_jellyfin_conservative_watch_metadata(env, jellyfin_data, monkeypatch, f
     jellyfin_data["episodes"]["Items"][0]["UserData"][field] = value
     jellyfin_client(monkeypatch, {"a" * 32: jellyfin_data})
     assert runner.discover_jellyfin(env, 2) == {99: {102}}
+    jellyfin_data["episodes"]["Items"][0]["ProviderIds"].pop("Tvdb")
+    eligible = runner.discover_jellyfin(env, 2)
+    assert eligible == {99: {102}}
+    assert not any("missing episode TVDB identifier" in reason for reason in eligible.exclusions)
+
+
+@pytest.mark.parametrize("watched", [False, True])
+@pytest.mark.parametrize(
+    "problem", ["missing-episode-id", "missing-series-id", "duplicate-series", "duplicate-episode"]
+)
+def test_jellyfin_activity_warns_only_for_watch_eligible_episodes(
+    env, client, jellyfin_data, monkeypatch, capsys, watched, problem
+):
+    env["MEDIA_SERVICE"] = "jellyfin"
+    for episode in jellyfin_data["episodes"]["Items"]:
+        episode["UserData"]["Played"] = watched
+    if problem == "missing-episode-id":
+        jellyfin_data["episodes"]["Items"][0]["ProviderIds"].pop("Tvdb")
+        warning = "missing episode TVDB identifier"
+    elif problem == "missing-series-id":
+        jellyfin_data["series"]["Items"][0]["ProviderIds"].pop("Tvdb")
+        warning = "no series TVDB mapping"
+    elif problem == "duplicate-series":
+        duplicate = deepcopy(jellyfin_data["series"]["Items"][0])
+        duplicate["Id"] = "duplicate-series"
+        jellyfin_data["series"]["Items"].append(duplicate)
+        jellyfin_data["series"]["TotalRecordCount"] = 2
+        warning = "duplicate series TVDB mapping"
+    else:
+        duplicate = deepcopy(jellyfin_data["episodes"]["Items"][0])
+        duplicate["Id"] = "duplicate-episode"
+        jellyfin_data["episodes"]["Items"].append(duplicate)
+        jellyfin_data["episodes"]["TotalRecordCount"] = 3
+        warning = "duplicate TVDB mapping"
+    jellyfin_client(monkeypatch, {"a" * 32: jellyfin_data})
+    assert runner.main([], env=env, client_factory=lambda *args: client) == 0
+    for output in (capsys.readouterr().out, Path(env["LOG_FILE"]).read_text()):
+        assert (warning in output) is watched
+        assert ("[WARNING]" in output) is watched
+        assert "Dry run complete: 0 file(s)" in output
+    client.upd_episode.assert_not_called()
+    client.del_episode_file.assert_not_called()
 
 
 def test_jellyfin_series_favourite_protects_every_episode(env, jellyfin_data, monkeypatch):
@@ -178,7 +220,9 @@ def test_jellyfin_duplicate_tvdb_episode_mapping_is_retained(env, jellyfin_data,
     jellyfin_data["episodes"]["Items"].append(duplicate)
     jellyfin_data["episodes"]["TotalRecordCount"] = 3
     jellyfin_client(monkeypatch, {"a" * 32: jellyfin_data})
-    assert runner.discover_jellyfin(env, 2) == {99: {102}}
+    eligible = runner.discover_jellyfin(env, 2)
+    assert eligible == {99: {102}}
+    assert any("duplicate TVDB mapping" in reason for reason in eligible.exclusions)
 
 
 def test_jellyfin_duplicate_series_mapping_is_retained(env, jellyfin_data, monkeypatch):

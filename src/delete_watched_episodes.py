@@ -259,6 +259,7 @@ def _jellyfin_user_eligibility(client, user_id, cutoff):
             {"Recursive": "true", "IncludeItemTypes": "Series", "Fields": "ProviderIds"},
         )
     )
+    series_by_id = {show["Id"]: show for show in series}
     shows, seen_series_tvdb, ambiguous_series = {}, set(), set()
     for show in series:
         try:
@@ -270,17 +271,44 @@ def _jellyfin_user_eligibility(client, user_id, cutoff):
         seen_series_tvdb.add(tvdb)
         shows[show["Id"]] = (tvdb, show)
     eligible = Eligibility()
-    seen, duplicates = set(), set()
-    for episode in jellyfin_items(
-        client,
-        user_id,
-        {
-            "Recursive": "true",
-            "IncludeItemTypes": "Episode",
-            "Fields": "ProviderIds",
-            "IsMissing": "false",
-        },
-    ):
+    episodes = list(
+        jellyfin_items(
+            client,
+            user_id,
+            {
+                "Recursive": "true",
+                "IncludeItemTypes": "Episode",
+                "Fields": "ProviderIds",
+                "IsMissing": "false",
+            },
+        )
+    )
+    for episode in episodes:
+        identity = f"Jellyfin item {episode['Id']}"
+        data = episode.get("UserData")
+        show_data = series_by_id.get(episode.get("SeriesId"))
+        show_user_data = show_data.get("UserData") if show_data is not None else None
+        if not isinstance(data, dict) or (
+            show_data is not None and not isinstance(show_user_data, dict)
+        ):
+            eligible.exclusions.append(f"{identity} retained: missing user metadata.")
+            continue
+        played = get_last_played_timestamp(data)
+        if (
+            (show_user_data is not None and show_user_data.get("IsFavorite") is not False)
+            or data.get("IsFavorite") is not False
+            or data.get("Played") is not True
+            or type(data.get("PlaybackPositionTicks")) is not int
+            or data.get("PlaybackPositionTicks") != 0
+            or played is None
+            or played >= cutoff
+        ):
+            eligible.exclusions.append(
+                f"{identity} retained: ambiguous, protected, in progress or outside watch policy."
+            )
+            continue
+
+        # Check watch eligibility before validating TVDB metadata or warning.
         show = shows.get(episode.get("SeriesId"))
         try:
             episode_id = positive_id(episode.get("ProviderIds", {}).get("Tvdb"))
@@ -305,42 +333,35 @@ def _jellyfin_user_eligibility(client, user_id, cutoff):
                 f"Jellyfin episode {episode_id} retained: no series TVDB mapping."
             )
             continue
-        series_id, show_data = show
-        key = (series_id, episode_id)
-        if key in seen:
-            duplicates.add(key)
-        seen.add(key)
+        series_id, _ = show
         if series_id in ambiguous_series:
             eligible.exclusions.append(
                 f"Jellyfin series {series_id} retained: duplicate series TVDB mapping."
             )
             continue
-        data, show_user_data = episode.get("UserData"), show_data.get("UserData")
-        if not isinstance(data, dict) or not isinstance(show_user_data, dict):
-            eligible.exclusions.append(
-                f"Jellyfin series {series_id}, episode {episode_id} retained: missing user metadata."
-            )
-            continue
-        played = get_last_played_timestamp(data)
-        if (
-            show_user_data.get("IsFavorite") is not False
-            or data.get("IsFavorite") is not False
-            or data.get("Played") is not True
-            or type(data.get("PlaybackPositionTicks")) is not int
-            or data.get("PlaybackPositionTicks") != 0
-            or played is None
-            or played >= cutoff
-        ):
-            eligible.exclusions.append(
-                f"Jellyfin series {series_id}, episode {episode_id} retained: ambiguous, protected, in progress or outside watch policy."
-            )
-            continue
         eligible.setdefault(series_id, set()).add(episode_id)
+    # Audit every mapping, including unwatched copies, so an eligible episode
+    # cannot bypass duplicate protection. Only blocked candidates need warnings.
+    seen, duplicates = set(), set()
+    for episode in episodes:
+        show = shows.get(episode.get("SeriesId"))
+        if show is None:
+            continue
+        try:
+            episode_id = positive_id(episode.get("ProviderIds", {}).get("Tvdb"))
+        except ValueError:
+            continue
+        key = (show[0], episode_id)
+        if key in seen:
+            duplicates.add(key)
+        seen.add(key)
     for series_id, episode_id in duplicates:
-        eligible.get(series_id, set()).discard(episode_id)
-        eligible.exclusions.append(
-            f"Jellyfin series {series_id}, episode {episode_id} retained: duplicate TVDB mapping."
-        )
+        candidates = eligible.get(series_id, set())
+        if episode_id in candidates:
+            candidates.discard(episode_id)
+            eligible.exclusions.append(
+                f"Jellyfin series {series_id}, episode {episode_id} retained: duplicate TVDB mapping."
+            )
     return eligible
 
 
